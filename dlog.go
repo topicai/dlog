@@ -1,7 +1,7 @@
-package lc
+package dlog
 
 import (
-	"encoding/json"
+	"encoding/gob"
 	"fmt"
 	"log"
 	"os"
@@ -19,7 +19,7 @@ type Logger struct {
 	msgType reflect.Type
 	sizeCap int64
 	file    *os.File
-	encoder *json.Encoder
+	encoder *gob.Encoder
 }
 
 func NewLogger(dir string, msgExample interface{}, sizeCap int64) (*Logger, error) {
@@ -88,7 +88,7 @@ func (l *Logger) rotateFile() error {
 		return fmt.Errorf("Failed create log rotation file %v: %v", file, e)
 	} else {
 		l.file = f
-		l.encoder = json.NewEncoder(f)
+		l.encoder = gob.NewEncoder(f)
 	}
 
 	return nil

@@ -1,4 +1,4 @@
-package lc
+package dlog
 
 import (
 	"fmt"
@@ -27,14 +27,18 @@ func TestLog(t *testing.T) {
 	dir := path.Join(os.TempDir(), fmt.Sprintf("%016x", os.Getpid()))
 	l, _ := NewLogger(dir, SearchImpression{}, 10) // A very small cap msg size so that each file has one msg.
 
-	assert.NotPanics(t, func() { l.Log(SearchImpression{Session: "1", Query: "something"}) })
+	assert.NotPanics(t, func() {
+		l.Log(SearchImpression{Session: "1", Query: "something"})
+	})
 
 	type si struct {
 		Session string
 		Query   string
 		Results []string
 	}
-	assert.Panics(t, func() { l.Log(si{Session: "1"}) }) // si is not assignable to SearchImpression.
+	assert.Panics(t, func() {
+		l.Log(si{Session: "1"}) // si is not assignable to SearchImpression.
+	})
 
 	assert.NotPanics(t, func() { l.Log(SearchImpression{Session: "1", Query: "something again"}) })
 	fi, e := fs.ReadDir(path.Join(dir, "SearchImpression"))
