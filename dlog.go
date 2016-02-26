@@ -13,65 +13,35 @@ import (
 
 	"github.com/AdRoll/goamz/aws"
 	"github.com/AdRoll/goamz/kinesis"
+	"github.com/topicai/candy"
 )
 
 const (
-	// Message batches acceptable by Kinesis is no larger than 1MB.
-	maxBatchSize = uintptr(1 * 1024 * 1024)
+	// Maximum Kinesis message batch is no larger than 5MB.
+	maxBatchSize = 5 * 1024 * 1024
 
-	// dlog writes into buffered channels. Here is the write timeout.
-	writeTimeout = time.Second * 10
+	// Maximum Kinesis message size is 1MB.
+	maxMessageSize = 1 * 1024 * 1024
 
 	// dlog syncs from buffered channels to Kinesis periodically.
 	syncPeriod = time.Second
 )
 
-type Options struct {
-	AccessKey string // Required
-	SecretKey string // Required
-	Region    string // Required
-
-	// Required, stream name prefix, 一般用于区分不同部署环境。dev环境、CI环境、staging环境、production环境.
-	StreamNamePrefix string
-
-	// Optional, stream name suffix, 目前用于在测试时给创建的stream分配一个时间戳后缀, 确保每次执行unit test创建的stream的名字不同
-	StreamNameSuffix string
-}
-
 type Logger struct {
+	*Options
 	msgType    reflect.Type
 	streamName string
-	buffer     chan interface{}
-	options    *Options
-	kinesis    *kinesis.Kinesis
+	buffer     chan []byte
+	kinesis    KinesisInterface
 }
 
-func NewLogger(example interface{}, options *Options) (*Logger, error) {
-	t := reflect.TypeOf(example)
-
-	n, e := fullMsgTypeName(t)
-	if e != nil {
-		return nil, e
-	}
-
-	sn, e := streamName(n, options.StreamNamePrefix, options.StreamNameSuffix)
-	if e != nil {
-		return nil, e
-	}
-
-	buf := make(chan interface{})
-
-	k := kinesis.New(aws.Auth{
-		AccessKey: options.AccessKey,
-		SecretKey: options.SecretKey},
-		getAWSRegion(options.Region))
-
+func NewLogger(example interface{}, opts *Options) (*Logger, error) {
 	l := &Logger{
-		msgType:    t,
-		streamName: sn,
-		buffer:     buf,
-		options:    options,
-		kinesis:    k,
+		Options:    opts,
+		msgType:    reflect.TypeOf(example),
+		streamName: opts.streamName(example),
+		buffer:     make(chan []byte),
+		kinesis:    opts.kinesis(),
 	}
 	go l.sync()
 
@@ -83,38 +53,30 @@ func (l *Logger) Log(msg interface{}) error {
 		return fmt.Errorf("parameter (%+v) not assignable to %v", msg, l.msgType)
 	}
 
+	var timeout <-chan time.Time // Receiving from nil channel blocks forever.
+	if l.WriteTimeout >= 0 {
+		timeout = time.After(l.WriteTimeout)
+	}
+
 	select {
-	case l.buffer <- msg:
-	case <-time.After(writeTimeout):
+	case l.buffer <- encode(msg):
+	case <-timeout:
 		// TODO(y): Add unit test for write timeout logic.
-		return fmt.Errorf("dlog writes %+v timeout after %v", msg, writeTimeout)
+		return fmt.Errorf("dlog writes %+v timeout after %v", msg, l.WriteTimeout)
 	}
 
 	return nil
 }
 
-func streamName(fullMsgTypeName, prefix, suffix string) (string, error) {
-	if len(prefix) <= 0 {
-		return "", fmt.Errorf("prefix must be non-empty string")
-	}
-
-	var result string
-
-	if len(suffix) > 0 {
-		result = strings.Join([]string{prefix, fullMsgTypeName, suffix}, "--")
-	} else {
-		result = strings.Join([]string{prefix, fullMsgTypeName}, "--")
-	}
-
-	if len(result) > 128 { // refer to: http://docs.aws.amazon.com/kinesis/latest/APIReference/API_CreateStream.html#API_CreateStream_RequestParameters
-		return "", fmt.Errorf("stream name's length should not be longer than 128 characters")
-	}
-
-	return strings.ToLower(result), nil
+func encode(v interface{}) []byte {
+	var buf bytes.Buffer
+	candy.Must(gob.NewEncoder(&buf).Encode(v)) // Very rare case of errors.
+	return buf.Bytes()
 }
 
 func getAWSRegion(regionName string) aws.Region {
 	if n := strings.ToLower(regionName); n == "cn-north-1" {
+		// NOTE: github.com/AdRoll/goamz/aws.Regions doesn't include endpoints of Kinesis.
 		return aws.Region{
 			"cn-north-1",
 			aws.ServiceInfo{"https://ec2.cn-north-1.amazonaws.com.cn", aws.V2Signature},
@@ -147,30 +109,32 @@ func (l *Logger) sync() {
 	ticker := time.NewTicker(syncPeriod)
 
 	buf := make([][]byte, 0)
+	bufSize := 0
 
 	for {
-		f := false
+		flush := false
 
 		select {
 		case msg := <-l.buffer:
 			buf = append(buf, encode(msg))
-
-			if len(buf) >= l.batchSize {
-				log.Printf("buf size (%v) exceeds l.batchSize (%v)", len(buf), l.batchSize)
-				f = true // Flush if buffer big enough.
+			bufSize += len(msg)
+			if bufSize > maxBatchSize {
+				flush = true
 			}
+
 		case <-ticker.C:
-			log.Print("sync time is up")
-			f = true // Flush periodically.
+			flush = true
 		}
 
-		if f {
+		if flush && bufSize > 0 {
 			l.flush(buf)
+			buf = buf[0:0]
+			bufSize = 0
 		}
 	}
 }
 
-func (l *Logger) flush(buf []interface{}) {
+func (l *Logger) flush(buf [][]byte) {
 	defer func() { // Recover if panicking
 		if r := recover(); r != nil {
 			log.Printf("Recover from error (%v)", r)

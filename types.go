@@ -2,9 +2,12 @@ package dlog
 
 import (
 	"fmt"
+	"log"
 	"reflect"
 	"regexp"
 	"strings"
+
+	"github.com/topicai/candy"
 )
 
 var (
@@ -12,8 +15,30 @@ var (
 	// stream name. Because Kinesis requires that streams names
 	// follow pattern [a-zA-Z0-9_.-]+, we require Go type name
 	// compatible with this pattern.
-	pattern = regexp.MustCompile("[a-zA-Z0-9_.-]+")
+	streamNameRegexp = regexp.MustCompile(`^[a-zA-Z0-9\.\-_]+$`)
+
+	// All packages which contains Go struct types used for data
+	// logging need to call dllog.RegisterType to add the type
+	// into msgTypes, so that we can recreate a message variable
+	// given the type name.  For more details, please refer to
+	// README.md.
+	msgTypes map[string]reflect.Type
 )
+
+func RegisterType(msg interface{}) {
+	t := reflect.TypeOf(msg)
+
+	n, e := fullMsgTypeName(t)
+	candy.Must(e)
+
+	if tt, exists := msgTypes[n]; exists {
+		if tt != t {
+			log.Panicf("Type name %s already correspond to %v", n, tt)
+		}
+	} else {
+		msgTypes[n] = t
+	}
+}
 
 func fullMsgTypeName(t reflect.Type) (string, error) {
 	if t.Kind() == reflect.Ptr {
@@ -28,7 +53,7 @@ func fullMsgTypeName(t reflect.Type) (string, error) {
 		return "", fmt.Errorf("Cannot identity type name of dlog message")
 	}
 
-	if !pattern.MatchString(t.Name()) {
+	if !streamNameRegexp.MatchString(t.Name()) {
 		return "", fmt.Errorf("dlog message type name (%s) must match [a-zA-Z0-9_.-]+", t.Name())
 	}
 
@@ -46,9 +71,9 @@ func fullMsgTypeName(t reflect.Type) (string, error) {
 	// Names of buckets coupled with Firehose streams cannot have capitalized characters.
 	name = strings.ToLower(name)
 
-	if !pattern.MatchString(name) {
+	if !streamNameRegexp.MatchString(name) {
 		return "", fmt.Errorf("dlog message full type name (%s) must match [a-zA-Z0-9_.-]+", name)
 	}
 
-	return strings.ToLower(name), nil
+	return name, nil
 }
