@@ -65,10 +65,6 @@ func fullMsgTypeName(msg interface{}) (string, error) {
 		return "", fmt.Errorf("Cannot identity type name of dlog message")
 	}
 
-	if !streamNameRegexp.MatchString(t.Name()) {
-		return "", fmt.Errorf("dlog message type name (%s) must match [a-zA-Z0-9_.-]+", t.Name())
-	}
-
 	if len(t.PkgPath()) <= 0 {
 		return "", fmt.Errorf("Cannot identity package of dlog message type %v", t.PkgPath())
 	}

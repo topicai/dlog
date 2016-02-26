@@ -20,6 +20,9 @@ const (
 
 	// Maximum Kinesis message size is 1MB.
 	maxMessageSize = 1 * 1024 * 1024
+
+	// We use MD5 to compute the partitionKey.
+	partitionKeySize = 128
 )
 
 type Logger struct {
@@ -68,7 +71,7 @@ func (l *Logger) Log(msg interface{}) error {
 
 	en := encode(msg)
 	if len(en) > maxMessageSize {
-		log.Printf("Larger than 1MB Gob encoding of msg %+v", msg)
+		return fmt.Errorf("Larger than 1MB Gob encoding of msg")
 	} else {
 		select {
 		case l.buffer <- en:
@@ -96,32 +99,26 @@ func (l *Logger) sync() {
 	bufSize := 0
 
 	for {
-		flush := false
-
 		select {
 		case msg := <-l.buffer:
-			buf = append(buf, encode(msg))
-			bufSize += len(msg)
-			if bufSize > maxBatchSize {
-				flush = true
+			if bufSize+len(msg)+partitionKeySize >= maxBatchSize {
+				l.flush(&buf, &bufSize)
 			}
+			buf = append(buf, encode(msg))
+			bufSize += len(msg) + partitionKeySize
 
 		case <-ticker.C:
-			flush = true
-		}
-
-		if flush && bufSize > 0 {
-			l.flush(buf)
-			buf = buf[0:0]
-			bufSize = 0
+			if bufSize > 0 {
+				l.flush(&buf, &bufSize)
+			}
 		}
 	}
 }
 
-func (l *Logger) flush(buf [][]byte) {
-	entries := make([]kinesis.PutRecordsRequestEntry, 0, len(buf))
+func (l *Logger) flush(buf *[][]byte, bufSize *int) {
+	entries := make([]kinesis.PutRecordsRequestEntry, 0, len(*buf))
 
-	for _, msg := range buf {
+	for _, msg := range *buf {
 		entries = append(entries, kinesis.PutRecordsRequestEntry{
 			Data:         msg,
 			PartitionKey: partitionKey(msg),
@@ -130,11 +127,15 @@ func (l *Logger) flush(buf [][]byte) {
 
 	resp, e := l.kinesis.PutRecords(l.streamName, entries)
 	if e != nil {
+		// TODO(y): Retry sending the whole batch for up to n times.
 		log.Printf("PutRecords error %v", e)
-		return
 	} else if resp.FailedRecordCount > 0 {
+		// TODO(y): Resend the failed records.
 		log.Printf("PutRecords response error: %+v", resp)
 	}
+
+	*buf = (*buf)[0:0]
+	*bufSize = 0
 }
 
 func partitionKey(data []byte) string {
