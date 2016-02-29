@@ -5,11 +5,15 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const (
 	// Message batches acceptable by Kinesis is no larger than 1MB.
 	maxBatchSize = uintptr(1024 * 1024)
+
+	// dlog writes into buffered channels. Here is the write timeout.
+	writeTimeout = time.Second * 10
 )
 
 var (
@@ -20,14 +24,14 @@ var (
 	pattern = regexp.MustCompile("[a-zA-Z0-9_.-]+")
 )
 
-type Writer struct {
+type Logger struct {
 	msgType    reflect.Type
 	streamName string
 	batchSize  int
 	buffer     chan interface{}
 }
 
-func NewWriter(example interface{}) (*Writer, error) {
+func NewLogger(example interface{}) (*Logger, error) {
 	t := reflect.TypeOf(example)
 
 	n, e := fullMsgTypeName(t)
@@ -40,16 +44,31 @@ func NewWriter(example interface{}) (*Writer, error) {
 		return nil, e
 	}
 
-	return &Writer{
+	// New messages may come during flushing.
+	buf := make(chan interface{}, 2*b)
+
+	return &Logger{
 		msgType:    t,
 		streamName: n,
 		batchSize:  b,
-		buffer:     make(chan interface{}, 2*b), // New messages may come during flushing.
+		buffer:     buf,
 	}, nil
 }
 
-func (l *Writer) Log(msg interface{}) {
+func (l *Logger) Log(msg interface{}) error {
+	if !reflect.TypeOf(msg).AssignableTo(l.msgType) {
+		// TODO(y): Add unit test for type compatibility checking.
+		return fmt.Errorf("parameter (%+v) not assignable to %v", msg, l.msgType)
+	}
 
+	select {
+	case l.buffer <- msg:
+	case <-time.After(writeTimeout):
+		// TODO(y): Add unit test for write timeout logic.
+		return fmt.Errorf("dlog writes %+v timeout after %v", msg, writeTimeout)
+	}
+
+	return nil
 }
 
 func fullMsgTypeName(t reflect.Type) (string, error) {
