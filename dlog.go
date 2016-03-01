@@ -1,10 +1,15 @@
 package dlog
 
 import (
+	"bytes"
+	"crypto/md5"
+	"encoding/gob"
+	"encoding/hex"
 	"fmt"
 	"github.com/AdRoll/goamz/aws"
 	"github.com/AdRoll/goamz/kinesis"
 	caws "github.com/augmn/common/aws"
+	"log"
 	"reflect"
 	"strings"
 	"time"
@@ -84,7 +89,6 @@ func NewLogger(example interface{}, options *Options) (*Logger, error) {
 
 func (l *Logger) Log(msg interface{}) error {
 	if !reflect.TypeOf(msg).AssignableTo(l.msgType) {
-		// TODO(y): Add unit test for type compatibility checking.
 		return fmt.Errorf("parameter (%+v) not assignable to %v", msg, l.msgType)
 	}
 
@@ -148,9 +152,11 @@ func (l *Logger) sync() {
 			buf = append(buf, msg)
 
 			if len(buf) >= l.batchSize {
+				log.Printf("buf size (%v) exceeds l.batchSize (%v)", len(buf), l.batchSize)
 				f = true // Flush if buffer big enough.
 			}
 		case <-ticker.C:
+			log.Print("sync time is up")
 			f = true // Flush periodically.
 		}
 
@@ -161,9 +167,51 @@ func (l *Logger) sync() {
 }
 
 func (l *Logger) flush(buf []interface{}) {
+	defer func() { // Recover if panicking
+		if r := recover(); r != nil {
+			log.Printf("Recover from error (%v)", r)
+		}
+	}()
 
+	if len(buf) <= 0 {
+		return
+	}
 
+	entries := make([]kinesis.PutRecordsRequestEntry, 0, len(buf))
 
-	// TODO(y): Finish this.
+	for _, msg := range buf {
+		data, e := getMsgData(msg)
+		if e != nil {
+			continue
+		}
+		entries = append(entries, kinesis.PutRecordsRequestEntry{
+			Data:         data,
+			PartitionKey: getPartitionKey(data),
+		})
+	}
+
+	resp, err := l.kinesis.PutRecords(l.streamName, entries)
+	if err != nil {
+		log.Printf("error happens when call PutRecords (%v)", err)
+		return
+	}
+
+	log.Printf("success call PutRecords (%v)", resp)
 	buf = buf[0:0]
+}
+
+func getMsgData(msg interface{}) ([]byte, error) {
+	var buf bytes.Buffer
+
+	e := gob.NewEncoder(&buf).Encode(msg)
+	if e != nil {
+		return nil, e
+	}
+
+	return buf.Bytes(), e
+}
+
+func getPartitionKey(data []byte) string {
+	m := md5.Sum(data)
+	return hex.EncodeToString(m[:])
 }
