@@ -2,13 +2,20 @@ package dlog
 
 import (
 	"fmt"
+	"github.com/AdRoll/goamz/aws"
+	"github.com/AdRoll/goamz/kinesis"
+	caws "github.com/augmn/common/aws"
 	"reflect"
+	"strings"
 	"time"
 )
 
 const (
-	// Message batches acceptable by Kinesis is no larger than 1MB.
-	maxBatchSize = uintptr(1024 * 1024)
+	// Message batches acceptable by Kinesis's PutRecords API is no larger than 5MB.
+	maxBatchSize = uintptr(5 * 1024 * 1024)
+
+	// Record acceptable by Kinesis's PutRecords API is no longer than 1MB
+	maxMsgSize = uintptr(1 * 1024 * 1024)
 
 	// dlog writes into buffered channels. Here is the write timeout.
 	writeTimeout = time.Second * 10
@@ -17,17 +24,36 @@ const (
 	syncPeriod = time.Second
 )
 
+type Options struct {
+	AccessKey string // Required
+	SecretKey string // Required
+	Region    string // Required
+
+	// Required, stream name prefix, 一般用于区分不同部署环境。dev环境、CI环境、staging环境、production环境.
+	StreamNamePrefix string
+
+	// Optional, stream name suffix, 目前用于在测试时给创建的stream分配一个时间戳后缀, 确保每次执行unit test创建的stream的名字不同
+	StreamNameSuffix string
+}
+
 type Logger struct {
 	msgType    reflect.Type
 	streamName string
 	batchSize  int
 	buffer     chan interface{}
+	options    *Options
+	kinesis    *kinesis.Kinesis
 }
 
-func NewLogger(example interface{}) (*Logger, error) {
+func NewLogger(example interface{}, options *Options) (*Logger, error) {
 	t := reflect.TypeOf(example)
 
 	n, e := fullMsgTypeName(t)
+	if e != nil {
+		return nil, e
+	}
+
+	sn, e := getStreamName(n, options.StreamNamePrefix, options.StreamNameSuffix)
 	if e != nil {
 		return nil, e
 	}
@@ -42,9 +68,17 @@ func NewLogger(example interface{}) (*Logger, error) {
 
 	l := &Logger{
 		msgType:    t,
-		streamName: n,
+		streamName: sn,
 		batchSize:  b,
 		buffer:     buf,
+		options:    options,
+		kinesis: kinesis.New(
+			aws.Auth{
+				AccessKey: options.AccessKey,
+				SecretKey: options.SecretKey,
+			},
+			getAWSRegion(options.Region),
+		),
 	}
 	go l.sync()
 
@@ -68,11 +102,40 @@ func (l *Logger) Log(msg interface{}) error {
 }
 
 func batchSize(t reflect.Type) (int, error) {
-	b := int(maxBatchSize / t.Size())
-	if b <= 0 {
-		return 0, fmt.Errorf("Message size mustn't be bigger than %d", maxBatchSize)
+	if t.Size() > maxMsgSize {
+		return 0, fmt.Errorf("Message size mustn't be bigger than %d", maxMsgSize)
 	}
+
+	b := int(maxBatchSize / t.Size())
 	return b, nil
+}
+
+func getStreamName(fullMsgTypeName, prefix, suffix string) (string, error) {
+	if len(prefix) <= 0 {
+		return "", fmt.Errorf("prefix must be non-empty string")
+	}
+
+	var result string
+
+	if len(suffix) > 0 {
+		result = fmt.Sprintf("%v--%v--%v", prefix, fullMsgTypeName, suffix)
+	} else {
+		result = fmt.Sprintf("%v-%v", prefix, fullMsgTypeName)
+	}
+
+	if len(result) > 128 { // refer to: http://docs.aws.amazon.com/kinesis/latest/APIReference/API_CreateStream.html#API_CreateStream_RequestParameters
+		return "", fmt.Errorf("stream name's length should not be longer than 128 characters")
+	}
+
+	return strings.ToLower(result), nil
+}
+
+func getAWSRegion(regionName string) aws.Region {
+	if n := strings.ToLower(regionName); n == "cn-north-1" {
+		return caws.UpdatedCNNorth1
+	} else {
+		return aws.Regions[n]
+	}
 }
 
 func (l *Logger) sync() {
