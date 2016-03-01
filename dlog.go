@@ -119,9 +119,9 @@ func getStreamName(fullMsgTypeName, prefix, suffix string) (string, error) {
 	var result string
 
 	if len(suffix) > 0 {
-		result = fmt.Sprintf("%v--%v--%v", prefix, fullMsgTypeName, suffix)
+		result = strings.Join([]string{prefix, fullMsgTypeName, suffix}, "--")
 	} else {
-		result = fmt.Sprintf("%v-%v", prefix, fullMsgTypeName)
+		result = strings.Join([]string{prefix, fullMsgTypeName}, "--")
 	}
 
 	if len(result) > 128 { // refer to: http://docs.aws.amazon.com/kinesis/latest/APIReference/API_CreateStream.html#API_CreateStream_RequestParameters
