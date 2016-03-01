@@ -6,13 +6,13 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"fmt"
-	"github.com/AdRoll/goamz/aws"
-	"github.com/AdRoll/goamz/kinesis"
-	caws "github.com/augmn/common/aws"
 	"log"
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/AdRoll/goamz/aws"
+	"github.com/AdRoll/goamz/kinesis"
 )
 
 const (
@@ -41,7 +41,6 @@ type Options struct {
 type Logger struct {
 	msgType    reflect.Type
 	streamName string
-	batchSize  int
 	buffer     chan interface{}
 	options    *Options
 	kinesis    *kinesis.Kinesis
@@ -55,32 +54,24 @@ func NewLogger(example interface{}, options *Options) (*Logger, error) {
 		return nil, e
 	}
 
-	sn, e := getStreamName(n, options.StreamNamePrefix, options.StreamNameSuffix)
+	sn, e := streamName(n, options.StreamNamePrefix, options.StreamNameSuffix)
 	if e != nil {
 		return nil, e
 	}
 
-	b, e := batchSize(t)
-	if e != nil {
-		return nil, e
-	}
+	buf := make(chan interface{})
 
-	// New messages may come during flushing.
-	buf := make(chan interface{}, 2*b)
+	k := kinesis.New(aws.Auth{
+		AccessKey: options.AccessKey,
+		SecretKey: options.SecretKey},
+		getAWSRegion(options.Region))
 
 	l := &Logger{
 		msgType:    t,
 		streamName: sn,
-		batchSize:  b,
 		buffer:     buf,
 		options:    options,
-		kinesis: kinesis.New(
-			aws.Auth{
-				AccessKey: options.AccessKey,
-				SecretKey: options.SecretKey,
-			},
-			getAWSRegion(options.Region),
-		),
+		kinesis:    k,
 	}
 	go l.sync()
 
@@ -102,16 +93,7 @@ func (l *Logger) Log(msg interface{}) error {
 	return nil
 }
 
-func batchSize(t reflect.Type) (int, error) {
-	b := int(maxBatchSize / t.Size())
-	if b <= 0 {
-		return 0, fmt.Errorf("Message size mustn't be bigger than %d", maxBatchSize)
-	}
-
-	return b, nil
-}
-
-func getStreamName(fullMsgTypeName, prefix, suffix string) (string, error) {
+func streamName(fullMsgTypeName, prefix, suffix string) (string, error) {
 	if len(prefix) <= 0 {
 		return "", fmt.Errorf("prefix must be non-empty string")
 	}
@@ -133,7 +115,29 @@ func getStreamName(fullMsgTypeName, prefix, suffix string) (string, error) {
 
 func getAWSRegion(regionName string) aws.Region {
 	if n := strings.ToLower(regionName); n == "cn-north-1" {
-		return caws.UpdatedCNNorth1
+		return aws.Region{
+			"cn-north-1",
+			aws.ServiceInfo{"https://ec2.cn-north-1.amazonaws.com.cn", aws.V2Signature},
+			"https://s3.cn-north-1.amazonaws.com.cn",
+			"",
+			true,
+			true,
+			"",
+			"https://sns.cn-north-1.amazonaws.com.cn",
+			"https://sqs.cn-north-1.amazonaws.com.cn",
+			"",
+			"https://iam.cn-north-1.amazonaws.com.cn",
+			"https://elasticloadbalancing.cn-north-1.amazonaws.com.cn",
+			"",
+			"https://dynamodb.cn-north-1.amazonaws.com.cn",
+			aws.ServiceInfo{"https://monitoring.cn-north-1.amazonaws.com.cn", aws.V4Signature},
+			"https://autoscaling.cn-north-1.amazonaws.com.cn",
+			aws.ServiceInfo{"https://rds.cn-north-1.amazonaws.com.cn", aws.V4Signature},
+			"https://kinesis.cn-north-1.amazonaws.com.cn",
+			"https://sts.cn-north-1.amazonaws.com.cn",
+			"",
+			"",
+		}
 	} else {
 		return aws.Regions[n]
 	}

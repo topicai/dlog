@@ -36,13 +36,19 @@ func fullMsgTypeName(t reflect.Type) (string, error) {
 		return "", fmt.Errorf("Cannot identity package of dlog message type %v", t.PkgPath())
 	}
 
-	stream := fmt.Sprintf("%s.%s",
-		strings.Replace(t.PkgPath(), "/", "-", -1),
-		t.Name())
+	// Kinesis stream names and S3 bucket names cannot have '/'.
+	name := strings.Join(
+		[]string{
+			strings.Replace(t.PkgPath(), "/", "-", -1),
+			t.Name()},
+		".")
 
-	if !pattern.MatchString(stream) {
-		return "", fmt.Errorf("dlog message full type name (%s) must match [a-zA-Z0-9_.-]+", stream)
+	// Names of buckets coupled with Firehose streams cannot have capitalized characters.
+	name = strings.ToLower(name)
+
+	if !pattern.MatchString(name) {
+		return "", fmt.Errorf("dlog message full type name (%s) must match [a-zA-Z0-9_.-]+", name)
 	}
 
-	return stream, nil
+	return strings.ToLower(name), nil
 }
