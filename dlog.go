@@ -11,11 +11,13 @@ import (
 )
 
 const (
-	// Message batches acceptable by Kinesis's PutRecords API is no larger than 5MB.
-	maxBatchSize = uintptr(5 * 1024 * 1024)
+	// Each record in PutRecords request can be as large as 1 MB, up to a limit of 5 MB for the entire request, including partition keys
+	// refer to: http://docs.aws.amazon.com/kinesis/latest/APIReference/API_PutRecords.html
+	maxRecordSizeOfPutRecords = uintptr(1 * 1024 * 1024)
+	maxReqSizeOfPutRecords    = uintptr(5 * 1024 * 1024)
 
-	// Record acceptable by Kinesis's PutRecords API is no longer than 1MB
-	maxMsgSize = uintptr(1 * 1024 * 1024)
+	// Message batches in Buffer is no larger than 1MB.
+	maxBatchSize = uintptr(1 * 1024 * 1024)
 
 	// dlog writes into buffered channels. Here is the write timeout.
 	writeTimeout = time.Second * 10
@@ -102,11 +104,11 @@ func (l *Logger) Log(msg interface{}) error {
 }
 
 func batchSize(t reflect.Type) (int, error) {
-	if t.Size() > maxMsgSize {
-		return 0, fmt.Errorf("Message size mustn't be bigger than %d", maxMsgSize)
+	b := int(maxBatchSize / t.Size())
+	if b <= 0 {
+		return 0, fmt.Errorf("Message size mustn't be bigger than %d", maxBatchSize)
 	}
 
-	b := int(maxBatchSize / t.Size())
 	return b, nil
 }
 
