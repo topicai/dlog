@@ -11,11 +11,6 @@ import (
 )
 
 const (
-	// Each record in PutRecords request can be as large as 1 MB, up to a limit of 5 MB for the entire request, including partition keys
-	// refer to: http://docs.aws.amazon.com/kinesis/latest/APIReference/API_PutRecords.html
-	maxRecordSizeOfPutRecords = uintptr(1 * 1024 * 1024)
-	maxReqSizeOfPutRecords    = uintptr(5 * 1024 * 1024)
-
 	// Message batches in Buffer is no larger than 1MB.
 	maxBatchSize = uintptr(1 * 1024 * 1024)
 
@@ -145,18 +140,18 @@ func (l *Logger) sync() {
 
 	buf := make([]interface{}, 0, l.batchSize)
 
-	for msg := range l.buffer {
-		buf = append(buf, msg)
-
+	for {
 		f := false
-		if len(buf) >= l.batchSize {
-			f = true // Flush if buffer big enough.
-		}
 
 		select {
+		case msg := <-l.buffer:
+			buf = append(buf, msg)
+
+			if len(buf) >= l.batchSize {
+				f = true // Flush if buffer big enough.
+			}
 		case <-ticker.C:
 			f = true // Flush periodically.
-		default:
 		}
 
 		if f {
@@ -166,6 +161,9 @@ func (l *Logger) sync() {
 }
 
 func (l *Logger) flush(buf []interface{}) {
+
+
+
 	// TODO(y): Finish this.
 	buf = buf[0:0]
 }
