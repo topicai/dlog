@@ -3,7 +3,16 @@ package dlog
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
+)
+
+var (
+	// We use full Go type name of log messages as the Kinesis
+	// stream name. Because Kinesis requires that streams names
+	// follow pattern [a-zA-Z0-9_.-]+, we require Go type name
+	// compatible with this pattern.
+	pattern = regexp.MustCompile("[a-zA-Z0-9_.-]+")
 )
 
 func fullMsgTypeName(t reflect.Type) (string, error) {

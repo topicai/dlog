@@ -3,7 +3,6 @@ package dlog
 import (
 	"fmt"
 	"reflect"
-	"regexp"
 	"time"
 )
 
@@ -16,14 +15,6 @@ const (
 
 	// dlog syncs from buffered channels to Kinesis periodically.
 	syncPeriod = time.Second
-)
-
-var (
-	// We use full Go type name of log messages as the Kinesis
-	// stream name. Because Kinesis requires that streams names
-	// follow pattern [a-zA-Z0-9_.-]+, we require Go type name
-	// compatible with this pattern.
-	pattern = regexp.MustCompile("[a-zA-Z0-9_.-]+")
 )
 
 type Logger struct {
