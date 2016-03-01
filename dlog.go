@@ -146,14 +146,14 @@ func getAWSRegion(regionName string) aws.Region {
 func (l *Logger) sync() {
 	ticker := time.NewTicker(syncPeriod)
 
-	buf := make([]interface{}, 0, l.batchSize)
+	buf := make([][]byte, 0)
 
 	for {
 		f := false
 
 		select {
 		case msg := <-l.buffer:
-			buf = append(buf, msg)
+			buf = append(buf, encode(msg))
 
 			if len(buf) >= l.batchSize {
 				log.Printf("buf size (%v) exceeds l.batchSize (%v)", len(buf), l.batchSize)
