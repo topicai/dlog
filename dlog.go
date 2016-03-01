@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	// Message batches in Buffer is no larger than 1MB.
+	// Message batches acceptable by Kinesis is no larger than 1MB.
 	maxBatchSize = uintptr(1 * 1024 * 1024)
 
 	// dlog writes into buffered channels. Here is the write timeout.
