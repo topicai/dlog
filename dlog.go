@@ -34,15 +34,25 @@ type Logger struct {
 }
 
 func NewLogger(example interface{}, opts *Options) (*Logger, error) {
+	t, e := msgType(example)
+	if e != nil {
+		return nil, e
+	}
+
+	n, e := fullMsgTypeName(example)
+	if e != nil {
+		return nil, e
+	}
+
 	l := &Logger{
 		Options:    opts,
-		msgType:    reflect.TypeOf(example),
-		streamName: opts.streamName(example),
+		msgType:    t,
+		streamName: n,
 		buffer:     make(chan []byte),
 		kinesis:    opts.kinesis(),
 	}
-	go l.sync()
 
+	go l.sync()
 	return l, nil
 }
 
@@ -52,7 +62,7 @@ func (l *Logger) Log(msg interface{}) error {
 	}
 
 	var timeout <-chan time.Time // Receiving from nil channel blocks forever.
-	if l.WriteTimeout >= 0 {
+	if l.WriteTimeout > 0 {
 		timeout = time.After(l.WriteTimeout)
 	}
 
