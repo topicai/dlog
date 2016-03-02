@@ -26,9 +26,10 @@ var (
 )
 
 func RegisterType(msg interface{}) {
-	t := reflect.TypeOf(msg)
+	t, e := msgType(msg)
+	candy.Must(e)
 
-	n, e := fullMsgTypeName(t)
+	n, e := fullMsgTypeName(msg)
 	candy.Must(e)
 
 	if tt, exists := msgTypes[n]; exists {
@@ -40,13 +41,24 @@ func RegisterType(msg interface{}) {
 	}
 }
 
-func fullMsgTypeName(t reflect.Type) (string, error) {
+func msgType(msg interface{}) (reflect.Type, error) {
+	t := reflect.TypeOf(msg)
+
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
 
 	if t.Kind() != reflect.Struct {
-		return "", fmt.Errorf("dlog message must be either *struct or struct")
+		return nil, fmt.Errorf("dlog message must be either *struct or struct")
+	}
+
+	return t, nil
+}
+
+func fullMsgTypeName(msg interface{}) (string, error) {
+	t, e := msgType(msg)
+	if e != nil {
+		return "", e
 	}
 
 	if len(t.Name()) <= 0 {
