@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"log"
 	"reflect"
-	"strings"
 	"time"
 
-	"github.com/AdRoll/goamz/aws"
 	"github.com/AdRoll/goamz/kinesis"
 	"github.com/topicai/candy"
 )
@@ -58,13 +56,17 @@ func (l *Logger) Log(msg interface{}) error {
 		timeout = time.After(l.WriteTimeout)
 	}
 
-	select {
-	case l.buffer <- encode(msg):
-	case <-timeout:
-		// TODO(y): Add unit test for write timeout logic.
-		return fmt.Errorf("dlog writes %+v timeout after %v", msg, l.WriteTimeout)
+	en := encode(msg)
+	if len(en) > maxMessageSize {
+		log.Printf("Larger than 1MB Gob encoding of msg %+v", msg)
+	} else {
+		select {
+		case l.buffer <- en:
+		case <-timeout:
+			// TODO(y): Add unit test for write timeout logic.
+			return fmt.Errorf("dlog writes %+v timeout after %v", msg, l.WriteTimeout)
+		}
 	}
-
 	return nil
 }
 
@@ -72,43 +74,6 @@ func encode(v interface{}) []byte {
 	var buf bytes.Buffer
 	candy.Must(gob.NewEncoder(&buf).Encode(v)) // Very rare case of errors.
 	return buf.Bytes()
-}
-
-func getAWSRegion(regionName string) aws.Region {
-	if n := strings.ToLower(regionName); n == "cn-north-1" {
-		// NOTE: github.com/AdRoll/goamz/aws.Regions doesn't include endpoints of Kinesis.
-		return aws.Region{
-			Name: "cn-north-1",
-			EC2Endpoint: aws.ServiceInfo{
-				Endpoint: "https://ec2.cn-north-1.amazonaws.com.cn",
-				Signer:   aws.V2Signature},
-			S3Endpoint:           "https://s3.cn-north-1.amazonaws.com.cn",
-			S3BucketEndpoint:     "",
-			S3LocationConstraint: true,
-			S3LowercaseBucket:    true,
-			SDBEndpoint:          "",
-			SNSEndpoint:          "https://sns.cn-north-1.amazonaws.com.cn",
-			SQSEndpoint:          "https://sqs.cn-north-1.amazonaws.com.cn",
-			SESEndpoint:          "",
-			IAMEndpoint:          "https://iam.cn-north-1.amazonaws.com.cn",
-			ELBEndpoint:          "https://elasticloadbalancing.cn-north-1.amazonaws.com.cn",
-			KMSEndpoint:          "",
-			DynamoDBEndpoint:     "https://dynamodb.cn-north-1.amazonaws.com.cn",
-			CloudWatchServicepoint: aws.ServiceInfo{
-				Endpoint: "https://monitoring.cn-north-1.amazonaws.com.cn",
-				Signer:   aws.V4Signature},
-			AutoScalingEndpoint: "https://autoscaling.cn-north-1.amazonaws.com.cn",
-			RDSEndpoint: aws.ServiceInfo{
-				Endpoint: "https://rds.cn-north-1.amazonaws.com.cn",
-				Signer:   aws.V4Signature},
-			KinesisEndpoint:        "https://kinesis.cn-north-1.amazonaws.com.cn",
-			STSEndpoint:            "https://sts.cn-north-1.amazonaws.com.cn",
-			CloudFormationEndpoint: "",
-			ElastiCacheEndpoint:    "",
-		}
-	} else {
-		return aws.Regions[n]
-	}
 }
 
 func (l *Logger) sync() {
