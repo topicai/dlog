@@ -28,6 +28,7 @@ type Logger struct {
 	streamName string
 	buffer     chan []byte
 	kinesis    KinesisInterface
+	// TODO(y): Add writtenRecords, writtenBatches, failedRecords of type expvar.Int
 }
 
 func NewLogger(example interface{}, opts *Options) (*Logger, error) {
