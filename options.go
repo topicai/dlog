@@ -17,10 +17,11 @@ type Options struct {
 	SecretKey string
 	Region    string
 
-	// 用于区分不同部署环境。dev环境、CI环境、staging环境、production环境.
+	// StreamNamePrefix is one of "testing", "staging", or
+	// "production".  When StreamNamePrefix is "testing",
+	// StreamNameSuffix is often a unique timestamp, so that the
+	// stream name is unique for every run of unit test.
 	StreamNamePrefix string
-
-	// 用于在测试时给创建的stream分配一个时间戳后缀, 确保每次执行unit test创建的stream的名字不同
 	StreamNameSuffix string
 
 	WriteTimeout time.Duration // 0 means wait forever.
@@ -32,7 +33,7 @@ type Options struct {
 // "prefix--typeName(msg)" if suffix is empty.  streamName panics for
 // errors instead of returning them.
 func (o *Options) streamName(msg interface{}) string {
-	if len(o.StreamNamePrefix) <= 0 {
+	if !o.UseMockKinesis && len(o.StreamNamePrefix) <= 0 {
 		log.Panicf("Options.Prefix mustn't be empty")
 	}
 
