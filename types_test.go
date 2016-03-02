@@ -5,11 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"reflect"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func TestGetTypeFullName(t *testing.T) {
+func TestFullMsgTypeName(t *testing.T) {
 	assert := assert.New(t)
 
 	type LocalType struct {
@@ -18,11 +19,11 @@ func TestGetTypeFullName(t *testing.T) {
 
 	s, e := fullMsgTypeName(reflect.TypeOf(LocalType{}))
 	assert.Nil(e)
-	assert.Equal("github.com-topicai-dlog.LocalType", s)
+	assert.Equal("github.com-topicai-dlog.localtype", s)
 
 	s, e = fullMsgTypeName(reflect.TypeOf(&LocalType{}))
 	assert.Nil(e)
-	assert.Equal("github.com-topicai-dlog.LocalType", s)
+	assert.Equal("github.com-topicai-dlog.localtype", s)
 
 	s, e = fullMsgTypeName(reflect.TypeOf(struct{ Name string }{Name: "a name"}))
 	assert.NotNil(e)
