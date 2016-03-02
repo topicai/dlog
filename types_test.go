@@ -21,17 +21,15 @@ func TestFullMsgTypeName(t *testing.T) {
 	assert.Nil(e)
 	assert.Equal("github.com-topicai-dlog.localtype", s)
 
+	// Registering pointer to struct is like registering struct.
 	s, e = fullMsgTypeName(reflect.TypeOf(&LocalType{}))
 	assert.Nil(e)
 	assert.Equal("github.com-topicai-dlog.localtype", s)
 
+	// Registering unnamed struct.
 	s, e = fullMsgTypeName(reflect.TypeOf(struct{ Name string }{Name: "a name"}))
 	assert.NotNil(e)
 	assert.True(strings.Contains(fmt.Sprint(e), "Cannot identity type name of dlog message"))
-
-	s, e = fullMsgTypeName(reflect.TypeOf(&LocalType{Name: "a name"}))
-	assert.Nil(e)
-	assert.Equal("github.com-topicai-dlog.localtype", s)
 }
 
 func TestRegisterType(t *testing.T) {
@@ -47,7 +45,7 @@ func TestRegisterType(t *testing.T) {
 
 	assert.Panics(func() { RegisterType(&SomeType{}) }) // Already registered the plain struct type.
 
-	RegisterType(&AnotherType{})
+	RegisterType(&AnotherType{}) // Registering pointer to struct is like registering struct.
 	assert.Equal(reflect.TypeOf(&AnotherType{}),
 		msgTypes["github.com-topicai-dlog.anothertype"])
 
