@@ -2,8 +2,6 @@ package dlog
 
 import (
 	"fmt"
-	"log"
-	"reflect"
 	"strings"
 	"time"
 
@@ -30,14 +28,13 @@ type Options struct {
 }
 
 // streamName returns a string "prefix--typeName(msg)--suffix", or
-// "prefix--typeName(msg)" if suffix is empty.  streamName panics for
-// errors instead of returning them.
-func (o *Options) streamName(msg interface{}) string {
+// "prefix--typeName(msg)" if suffix is empty.
+func (o *Options) streamName(msg interface{}) (string, error) {
 	if !o.UseMockKinesis && len(o.StreamNamePrefix) <= 0 {
-		log.Panicf("Options.Prefix mustn't be empty")
+		return "", fmt.Errorf("Options.Prefix mustn't be empty")
 	}
 
-	tname, e := fullMsgTypeName(reflect.TypeOf(msg))
+	tname, e := fullMsgTypeName(msg)
 	candy.Must(e)
 
 	stream := fmt.Sprintf("%s--%s", o.StreamNamePrefix, tname)
@@ -47,13 +44,13 @@ func (o *Options) streamName(msg interface{}) string {
 
 	if len(stream) > 128 {
 		// http://docs.aws.amazon.com/kinesis/latest/APIReference/API_CreateStream.html#API_CreateStream_RequestParameters
-		log.Panicf("stream name (%s) longer than 128 characters.", stream)
+		return "", fmt.Errorf("stream name (%s) longer than 128 characters.", stream)
 	}
 
 	// We use the same name for Kinesis/Firehose stream and the
 	// coupled S3 bucket, however, the name of Firehose-coupled S3
 	// bucket cannot include capitalized characters.
-	return strings.ToLower(stream)
+	return strings.ToLower(stream), nil
 }
 
 func (o *Options) kinesis() KinesisInterface {

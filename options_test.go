@@ -7,6 +7,8 @@ import (
 )
 
 func TestOptionsStreamName(t *testing.T) {
+	assert := assert.New(t)
+
 	type Impression struct {
 		Query   string
 		Results []string
@@ -16,15 +18,15 @@ func TestOptionsStreamName(t *testing.T) {
 		StreamNamePrefix: "production",
 		StreamNameSuffix: ""}
 
-	assert.Equal(t,
-		"production--github.com-topicai-dlog.impression",
-		opts.streamName(Impression{}))
+	n, e := opts.streamName(Impression{})
+	assert.Nil(e)
+	assert.Equal("production--github.com-topicai-dlog.impression", n)
 
 	opts = &Options{
 		StreamNamePrefix: "dev",
 		StreamNameSuffix: "12345"}
 
-	assert.Equal(t,
-		"dev--github.com-topicai-dlog.impression--12345",
-		opts.streamName(Impression{}))
+	n, e = opts.streamName(Impression{})
+	assert.Nil(e)
+	assert.Equal("dev--github.com-topicai-dlog.impression--12345", n)
 }
