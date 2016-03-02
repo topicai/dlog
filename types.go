@@ -22,7 +22,7 @@ var (
 	// into msgTypes, so that we can recreate a message variable
 	// given the type name.  For more details, please refer to
 	// README.md.
-	msgTypes map[string]reflect.Type
+	msgTypes = make(map[string]reflect.Type)
 )
 
 func RegisterType(msg interface{}) {
