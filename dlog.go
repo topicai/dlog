@@ -20,9 +20,6 @@ const (
 
 	// Maximum Kinesis message size is 1MB.
 	maxMessageSize = 1 * 1024 * 1024
-
-	// dlog syncs from buffered channels to Kinesis periodically.
-	syncPeriod = time.Second
 )
 
 type Logger struct {
@@ -39,7 +36,7 @@ func NewLogger(example interface{}, opts *Options) (*Logger, error) {
 		return nil, e
 	}
 
-	n, e := fullMsgTypeName(example)
+	n, e := opts.streamName(example)
 	if e != nil {
 		return nil, e
 	}
@@ -57,7 +54,9 @@ func NewLogger(example interface{}, opts *Options) (*Logger, error) {
 }
 
 func (l *Logger) Log(msg interface{}) error {
-	if !reflect.TypeOf(msg).AssignableTo(l.msgType) {
+	if t, e := msgType(msg); e != nil {
+		return e
+	} else if !t.AssignableTo(l.msgType) {
 		return fmt.Errorf("parameter (%+v) not assignable to %v", msg, l.msgType)
 	}
 
@@ -87,7 +86,10 @@ func encode(v interface{}) []byte {
 }
 
 func (l *Logger) sync() {
-	ticker := time.NewTicker(syncPeriod)
+	if l.SyncPeriod <= 0 {
+		l.SyncPeriod = time.Second
+	}
+	ticker := time.NewTicker(l.SyncPeriod)
 
 	buf := make([][]byte, 0)
 	bufSize := 0
@@ -116,51 +118,25 @@ func (l *Logger) sync() {
 }
 
 func (l *Logger) flush(buf [][]byte) {
-	defer func() { // Recover if panicking
-		if r := recover(); r != nil {
-			log.Printf("Recover from error (%v)", r)
-		}
-	}()
-
-	if len(buf) <= 0 {
-		return
-	}
-
 	entries := make([]kinesis.PutRecordsRequestEntry, 0, len(buf))
 
 	for _, msg := range buf {
-		data, e := getMsgData(msg)
-		if e != nil {
-			continue
-		}
 		entries = append(entries, kinesis.PutRecordsRequestEntry{
-			Data:         data,
-			PartitionKey: getPartitionKey(data),
+			Data:         msg,
+			PartitionKey: partitionKey(msg),
 		})
 	}
 
-	resp, err := l.kinesis.PutRecords(l.streamName, entries)
-	if err != nil {
-		log.Printf("error happens when call PutRecords (%v)", err)
-		return
-	}
-
-	log.Printf("success call PutRecords (%v)", resp)
-	buf = buf[0:0]
-}
-
-func getMsgData(msg interface{}) ([]byte, error) {
-	var buf bytes.Buffer
-
-	e := gob.NewEncoder(&buf).Encode(msg)
+	resp, e := l.kinesis.PutRecords(l.streamName, entries)
 	if e != nil {
-		return nil, e
+		log.Printf("PutRecords error %v", e)
+		return
+	} else if resp.FailedRecordCount > 0 {
+		log.Printf("PutRecords response error: %+v", resp)
 	}
-
-	return buf.Bytes(), e
 }
 
-func getPartitionKey(data []byte) string {
+func partitionKey(data []byte) string {
 	m := md5.Sum(data)
 	return hex.EncodeToString(m[:])
 }

@@ -22,7 +22,14 @@ type Options struct {
 	StreamNamePrefix string
 	StreamNameSuffix string
 
-	WriteTimeout time.Duration // 0 means wait forever.
+	// The timeout for Logger.Log to write into a channel, when
+	// the channel is blocked at reading end.  0 means wait
+	// forever.
+	WriteTimeout time.Duration
+
+	// a sync goroutine reads messages from the channels, and send
+	// packed messages to Kinesis periodically. 0 means 1 second.
+	SyncPeriod time.Duration
 
 	UseMockKinesis bool // By default this is false, which means using AWS Kinesis.
 }
