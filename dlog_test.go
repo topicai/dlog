@@ -2,73 +2,56 @@ package dlog
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
 const (
-	// change following 2 arguments before test
-	testingAccessKey  = "AKIAP5BYKMCA"
-	testingSecretKey  = "3uqJbLQGRFtyMCb0zT"
-
+	testingAccessKey  = "AKIAP4GWC7C4S5BYKMCA"
+	testingSecretKey  = "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"
 	testingRegion     = "cn-north-1"
 	testingShardCount = 2
 )
 
-var (
-	testingStreamNamePrefix = "t"
-	testingStreamNameSuffix = strconv.FormatInt(time.Now().UnixNano(), 10)
-)
-
-type ClickImpression struct {
+type click struct {
 	Session string
 	Element string
 }
 
-type SearchImpression struct {
+type impression struct {
 	Session string
 	Query   string
 	Results []string // List of search results.
 }
 
-func TestNewLogger(t *testing.T) {
+func TestLoggingToMockKinesis(t *testing.T) {
 	assert := assert.New(t)
 
-	l, e := NewLogger(&SearchImpression{}, &Options{
-		AccessKey:        testingAccessKey,
-		SecretKey:        testingSecretKey,
-		Region:           testingRegion,
-		StreamNamePrefix: testingStreamNamePrefix,
-		StreamNameSuffix: testingStreamNameSuffix,
+	l, e := NewLogger(&impression{}, &Options{
+		WriteTimeout:   0, // Wait forever.
+		SyncPeriod:     time.Second,
+		UseMockKinesis: true,
 	})
-	assert.NotNil(l)
 	assert.Nil(e)
-}
-
-func TestLog(t *testing.T) {
-	assert := assert.New(t)
-
-	l, e := NewLogger(&SearchImpression{}, &Options{
-		AccessKey:        testingAccessKey,
-		SecretKey:        testingSecretKey,
-		Region:           testingRegion,
-		StreamNamePrefix: testingStreamNamePrefix,
-		StreamNameSuffix: testingStreamNameSuffix,
-	})
 	assert.NotNil(l)
-	assert.Nil(e)
 
-	incorrectMsg := &ClickImpression{
-		Session: "session1",
-		Element: "btnAddVenue",
-	}
-	e = l.Log(incorrectMsg)
-	assert.NotNil(e)
-	assert.True(strings.Contains(fmt.Sprint(e), "not assignable to"))
+	storage := l.kinesis.(*kinesisMock).storage
+	assert.NotNil(storage)
+
+	// Logging wrong type writes nothing.
+	assert.NotNil(l.Log(click{}))
+	time.Sleep(2 * l.SyncPeriod) // Wait enough long for syncing.
+	assert.Equal(0, len(storage))
+
+	assert.Nil(l.Log(impression{Session: "0"}))
+	assert.Equal(0, len(storage)) // No waiting for syncing.
+	time.Sleep(2 * l.SyncPeriod)
+	assert.Equal(1, len(storage)) // After waiting for syncing.
 }
 
 type WriteLogSuiteTester struct {
@@ -88,15 +71,15 @@ func (s *WriteLogSuiteTester) SetupSuite() {
 		AccessKey:        testingAccessKey,
 		SecretKey:        testingSecretKey,
 		Region:           testingRegion,
-		StreamNamePrefix: testingStreamNamePrefix,
-		StreamNameSuffix: testingStreamNameSuffix,
+		StreamNamePrefix: "testing",
+		StreamNameSuffix: fmt.Sprint(time.Now().UnixNano()),
 	}
 
 	var err error
-	s.seachLogger, err = NewLogger(&SearchImpression{}, s.options)
+	s.seachLogger, err = NewLogger(&impression{}, s.options)
 	s.Nil(err)
 
-	s.clickLogger, err = NewLogger(&ClickImpression{}, s.options)
+	s.clickLogger, err = NewLogger(&click{}, s.options)
 	s.Nil(err)
 
 	// create stream 1
@@ -128,13 +111,11 @@ func (s *WriteLogSuiteTester) SetupSuite() {
 // The TearDownSuite method will be run by testify once, at the very
 // end of the testing suite, after all tests have been run.
 func (s *WriteLogSuiteTester) TearDownSuite() {
-
 	if s.streamNames == nil || len(s.streamNames) == 0 {
 		return
 	}
 
 	for _, streamName := range s.streamNames {
-		s.T().Logf("Delete stream %v", streamName)
 		err := s.seachLogger.kinesis.DeleteStream(streamName)
 		s.Nil(err)
 	}
@@ -148,7 +129,7 @@ func (s *WriteLogSuiteTester) TestWriteLog() {
 	}()
 
 	for i := 0; i < 20; i++ {
-		click := &ClickImpression{
+		click := &click{
 			Session: "Ethan",
 			Element: "btnAddVenue" + strconv.Itoa(i),
 		}
@@ -156,7 +137,7 @@ func (s *WriteLogSuiteTester) TestWriteLog() {
 		err1 := s.clickLogger.Log(click)
 		s.Nil(err1)
 
-		search := &SearchImpression{
+		search := &impression{
 			Session: "Jack",
 			Query:   "food" + strconv.Itoa(i),
 			Results: []string{"apple", "banana"},

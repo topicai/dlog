@@ -6,212 +6,139 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"fmt"
-	"github.com/AdRoll/goamz/aws"
-	"github.com/AdRoll/goamz/kinesis"
-	caws "github.com/augmn/common/aws"
 	"log"
 	"reflect"
-	"strings"
 	"time"
+
+	"github.com/AdRoll/goamz/kinesis"
+	"github.com/topicai/candy"
 )
 
 const (
-	// Message batches acceptable by Kinesis is no larger than 1MB.
-	maxBatchSize = uintptr(1 * 1024 * 1024)
+	// Maximum Kinesis message batch is no larger than 5MB.
+	maxBatchSize = 5 * 1024 * 1024
 
-	// dlog writes into buffered channels. Here is the write timeout.
-	writeTimeout = time.Second * 10
+	// Maximum Kinesis message size is 1MB.
+	maxMessageSize = 1 * 1024 * 1024
 
-	// dlog syncs from buffered channels to Kinesis periodically.
-	syncPeriod = time.Second
+	// We use MD5 to compute the partitionKey.
+	partitionKeySize = 128
 )
 
-type Options struct {
-	AccessKey string // Required
-	SecretKey string // Required
-	Region    string // Required
-
-	// Required, stream name prefix, 一般用于区分不同部署环境。dev环境、CI环境、staging环境、production环境.
-	StreamNamePrefix string
-
-	// Optional, stream name suffix, 目前用于在测试时给创建的stream分配一个时间戳后缀, 确保每次执行unit test创建的stream的名字不同
-	StreamNameSuffix string
-}
-
 type Logger struct {
+	*Options
 	msgType    reflect.Type
 	streamName string
-	batchSize  int
-	buffer     chan interface{}
-	options    *Options
-	kinesis    *kinesis.Kinesis
+	buffer     chan []byte
+	kinesis    KinesisInterface
+	// TODO(y): Add writtenRecords, writtenBatches, failedRecords of type expvar.Int
 }
 
-func NewLogger(example interface{}, options *Options) (*Logger, error) {
-	t := reflect.TypeOf(example)
-
-	n, e := fullMsgTypeName(t)
+func NewLogger(example interface{}, opts *Options) (*Logger, error) {
+	t, e := msgType(example)
 	if e != nil {
 		return nil, e
 	}
 
-	sn, e := getStreamName(n, options.StreamNamePrefix, options.StreamNameSuffix)
+	n, e := opts.streamName(example)
 	if e != nil {
 		return nil, e
 	}
-
-	b, e := batchSize(t)
-	if e != nil {
-		return nil, e
-	}
-
-	// New messages may come during flushing.
-	buf := make(chan interface{}, 2*b)
 
 	l := &Logger{
+		Options:    opts,
 		msgType:    t,
-		streamName: sn,
-		batchSize:  b,
-		buffer:     buf,
-		options:    options,
-		kinesis: kinesis.New(
-			aws.Auth{
-				AccessKey: options.AccessKey,
-				SecretKey: options.SecretKey,
-			},
-			getAWSRegion(options.Region),
-		),
+		streamName: n,
+		buffer:     make(chan []byte),
+		kinesis:    opts.kinesis(),
 	}
-	go l.sync()
 
+	go l.sync()
 	return l, nil
 }
 
 func (l *Logger) Log(msg interface{}) error {
-	if !reflect.TypeOf(msg).AssignableTo(l.msgType) {
+	if t, e := msgType(msg); e != nil {
+		return e
+	} else if !t.AssignableTo(l.msgType) {
 		return fmt.Errorf("parameter (%+v) not assignable to %v", msg, l.msgType)
 	}
 
-	select {
-	case l.buffer <- msg:
-	case <-time.After(writeTimeout):
-		// TODO(y): Add unit test for write timeout logic.
-		return fmt.Errorf("dlog writes %+v timeout after %v", msg, writeTimeout)
+	var timeout <-chan time.Time // Receiving from nil channel blocks forever.
+	if l.WriteTimeout > 0 {
+		timeout = time.After(l.WriteTimeout)
 	}
 
+	en := encode(msg)
+	if len(en) > maxMessageSize {
+		return fmt.Errorf("Larger than 1MB Gob encoding of msg")
+	} else {
+		select {
+		case l.buffer <- en:
+		case <-timeout:
+			// TODO(y): Add unit test for write timeout logic.
+			return fmt.Errorf("dlog writes %+v timeout after %v", msg, l.WriteTimeout)
+		}
+	}
 	return nil
 }
 
-func batchSize(t reflect.Type) (int, error) {
-	b := int(maxBatchSize / t.Size())
-	if b <= 0 {
-		return 0, fmt.Errorf("Message size mustn't be bigger than %d", maxBatchSize)
-	}
-
-	return b, nil
-}
-
-func getStreamName(fullMsgTypeName, prefix, suffix string) (string, error) {
-	if len(prefix) <= 0 {
-		return "", fmt.Errorf("prefix must be non-empty string")
-	}
-
-	var result string
-
-	if len(suffix) > 0 {
-		result = strings.Join([]string{prefix, fullMsgTypeName, suffix}, "--")
-	} else {
-		result = strings.Join([]string{prefix, fullMsgTypeName}, "--")
-	}
-
-	if len(result) > 128 { // refer to: http://docs.aws.amazon.com/kinesis/latest/APIReference/API_CreateStream.html#API_CreateStream_RequestParameters
-		return "", fmt.Errorf("stream name's length should not be longer than 128 characters")
-	}
-
-	return strings.ToLower(result), nil
-}
-
-func getAWSRegion(regionName string) aws.Region {
-	if n := strings.ToLower(regionName); n == "cn-north-1" {
-		return caws.UpdatedCNNorth1
-	} else {
-		return aws.Regions[n]
-	}
+func encode(v interface{}) []byte {
+	var buf bytes.Buffer
+	candy.Must(gob.NewEncoder(&buf).Encode(v)) // Very rare case of errors.
+	return buf.Bytes()
 }
 
 func (l *Logger) sync() {
-	ticker := time.NewTicker(syncPeriod)
+	if l.SyncPeriod <= 0 {
+		l.SyncPeriod = time.Second
+	}
+	ticker := time.NewTicker(l.SyncPeriod)
 
-	buf := make([]interface{}, 0, l.batchSize)
+	buf := make([][]byte, 0)
+	bufSize := 0
 
 	for {
-		f := false
-
 		select {
 		case msg := <-l.buffer:
-			buf = append(buf, msg)
-
-			if len(buf) >= l.batchSize {
-				log.Printf("buf size (%v) exceeds l.batchSize (%v)", len(buf), l.batchSize)
-				f = true // Flush if buffer big enough.
+			if bufSize+len(msg)+partitionKeySize >= maxBatchSize {
+				l.flush(&buf, &bufSize)
 			}
-		case <-ticker.C:
-			log.Print("sync time is up")
-			f = true // Flush periodically.
-		}
+			buf = append(buf, encode(msg))
+			bufSize += len(msg) + partitionKeySize
 
-		if f {
-			l.flush(buf)
+		case <-ticker.C:
+			if bufSize > 0 {
+				l.flush(&buf, &bufSize)
+			}
 		}
 	}
 }
 
-func (l *Logger) flush(buf []interface{}) {
-	defer func() { // Recover if panicking
-		if r := recover(); r != nil {
-			log.Printf("Recover from error (%v)", r)
-		}
-	}()
+func (l *Logger) flush(buf *[][]byte, bufSize *int) {
+	entries := make([]kinesis.PutRecordsRequestEntry, 0, len(*buf))
 
-	if len(buf) <= 0 {
-		return
-	}
-
-	entries := make([]kinesis.PutRecordsRequestEntry, 0, len(buf))
-
-	for _, msg := range buf {
-		data, e := getMsgData(msg)
-		if e != nil {
-			continue
-		}
+	for _, msg := range *buf {
 		entries = append(entries, kinesis.PutRecordsRequestEntry{
-			Data:         data,
-			PartitionKey: getPartitionKey(data),
+			Data:         msg,
+			PartitionKey: partitionKey(msg),
 		})
 	}
 
-	resp, err := l.kinesis.PutRecords(l.streamName, entries)
-	if err != nil {
-		log.Printf("error happens when call PutRecords (%v)", err)
-		return
-	}
-
-	log.Printf("success call PutRecords (%v)", resp)
-	buf = buf[0:0]
-}
-
-func getMsgData(msg interface{}) ([]byte, error) {
-	var buf bytes.Buffer
-
-	e := gob.NewEncoder(&buf).Encode(msg)
+	resp, e := l.kinesis.PutRecords(l.streamName, entries)
 	if e != nil {
-		return nil, e
+		// TODO(y): Retry sending the whole batch for up to n times.
+		log.Printf("PutRecords error %v", e)
+	} else if resp.FailedRecordCount > 0 {
+		// TODO(y): Resend the failed records.
+		log.Printf("PutRecords response error: %+v", resp)
 	}
 
-	return buf.Bytes(), e
+	*buf = (*buf)[0:0]
+	*bufSize = 0
 }
 
-func getPartitionKey(data []byte) string {
+func partitionKey(data []byte) string {
 	m := md5.Sum(data)
 	return hex.EncodeToString(m[:])
 }

@@ -1,5 +1,7 @@
 # `dlog`
 
+[![Build Status](https://travis-ci.org/topicai/dlog.svg?branch=develop)](https://travis-ci.org/topicai/dlog)
+
 `dlog` is a Go package for distributed structure logging using Amazon
 AWS Kinesis/Firehose.  It contains two perspectives:
 
