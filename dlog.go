@@ -52,12 +52,17 @@ func NewLogger(example interface{}, opts *Options) (*Logger, error) {
 		return nil, e
 	}
 
+	k, e := opts.kinesis()
+	if e != nil {
+		return nil, e
+	}
+
 	l := &Logger{
 		Options:    opts,
 		msgType:    t,
 		streamName: n,
 		buffer:     make(chan []byte),
-		kinesis:    opts.kinesis(),
+		kinesis:    k,
 	}
 
 	go l.sync()

@@ -36,6 +36,7 @@ func TestLoggingToMockKinesis(t *testing.T) {
 		WriteTimeout:   0, // Wait forever.
 		SyncPeriod:     time.Second,
 		UseMockKinesis: true,
+		MockKinesis:    newKinesisMock(),
 	})
 	assert.Nil(e)
 	assert.NotNil(l)
@@ -148,10 +149,38 @@ func (s *WriteLogSuiteTester) TestWriteLog() {
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	time.Sleep(3 * time.Second)  // make sure records in buffer channel will be sent to Kinesis
+	time.Sleep(3 * time.Second) // make sure records in buffer channel will be sent to Kinesis
 }
 
 func TestRunWriteLogSuite(t *testing.T) {
 	suiteTester := new(WriteLogSuiteTester)
 	suite.Run(t, suiteTester)
+}
+
+func TestLogWriteTimeout(t *testing.T) {
+	assert := assert.New(t)
+
+	l, e := NewLogger(&impression{}, &Options{
+		WriteTimeout:   3 * time.Second,
+		SyncPeriod:     10000 * time.Second, // set a long time to make time ticker will not trigger sync
+		UseMockKinesis: true,
+		MockKinesis:    newSlowKinesisMock(600 * time.Second), // make latency big enough
+	})
+	assert.Nil(e)
+	assert.NotNil(l)
+
+	for i := 0; i < 100000; i++ { // write enough messages to make sure buf is full and trigger sync
+		search := &impression{
+			Session: "Jack",
+			Query:   "food",
+			Results: []string{strings.Repeat("1234567890", 1024*10)},
+		}
+
+		e = l.Log(search)
+		if e != nil {
+			assert.NotNil(e)
+			assert.True(strings.Contains(fmt.Sprint(e), "timeout after"))
+			break
+		}
+	}
 }

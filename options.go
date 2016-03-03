@@ -32,6 +32,7 @@ type Options struct {
 	SyncPeriod time.Duration
 
 	UseMockKinesis bool // By default this is false, which means using AWS Kinesis.
+	MockKinesis    KinesisInterface
 }
 
 // streamName returns a string "prefix--typeName(msg)--suffix", or
@@ -60,16 +61,20 @@ func (o *Options) streamName(msg interface{}) (string, error) {
 	return strings.ToLower(stream), nil
 }
 
-func (o *Options) kinesis() KinesisInterface {
+func (o *Options) kinesis() (KinesisInterface, error) {
 	if o.UseMockKinesis {
-		return newKinesisMock()
+		if o.MockKinesis == nil {
+			return nil, fmt.Errorf("MockKinesis mustn't be nil if UseMockKinesis is true")
+		}
+
+		return o.MockKinesis, nil
 	}
 
 	return kinesis.New(
 		aws.Auth{
 			AccessKey: o.AccessKey,
 			SecretKey: o.SecretKey},
-		awsRegion(o.Region))
+		awsRegion(o.Region)), nil
 }
 
 func awsRegion(regionName string) aws.Region {
