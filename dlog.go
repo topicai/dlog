@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/gob"
 	"encoding/hex"
+	"expvar"
 	"fmt"
 	"log"
 	"reflect"
@@ -25,13 +26,19 @@ const (
 	partitionKeySize = 128
 )
 
+var (
+	// dlog exposed runtime metrics
+	writtenRecords = expvar.NewInt("dlog_written_records")
+	writtenBatches = expvar.NewInt("dlog_written_batches")
+	failedRecords  = expvar.NewInt("dlog_failed_records")
+)
+
 type Logger struct {
 	*Options
 	msgType    reflect.Type
 	streamName string
 	buffer     chan []byte
 	kinesis    KinesisInterface
-	// TODO(y): Add writtenRecords, writtenBatches, failedRecords of type expvar.Int
 }
 
 func NewLogger(example interface{}, opts *Options) (*Logger, error) {
@@ -127,12 +134,28 @@ func (l *Logger) flush(buf *[][]byte, bufSize *int) {
 
 	resp, e := l.kinesis.PutRecords(l.streamName, entries)
 	if e != nil {
+		failedRecords.Add(int64(len(entries)))
+
 		// TODO(y): Retry sending the whole batch for up to n times.
 		log.Printf("PutRecords error %v", e)
 	} else if resp.FailedRecordCount > 0 {
+		writtenBatches.Add(1)
+		writtenRecords.Add(int64(len(entries) - resp.FailedRecordCount))
+		failedRecords.Add(int64(resp.FailedRecordCount))
+
 		// TODO(y): Resend the failed records.
 		log.Printf("PutRecords response error: %+v", resp)
+	} else {
+		writtenBatches.Add(1)
+		writtenRecords.Add(int64(len(entries)))
 	}
+
+	log.Printf(
+		"after PutRecords, writtenBatches = %v, writtenRecords = %v, failedRecords = %v",
+		writtenBatches,
+		writtenRecords,
+		failedRecords,
+	)
 
 	*buf = (*buf)[0:0]
 	*bufSize = 0

@@ -147,6 +147,8 @@ func (s *WriteLogSuiteTester) TestWriteLog() {
 
 		time.Sleep(200 * time.Millisecond)
 	}
+
+	time.Sleep(3 * time.Second)  // make sure records in buffer channel will be sent to Kinesis
 }
 
 func TestRunWriteLogSuite(t *testing.T) {
