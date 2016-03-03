@@ -102,7 +102,7 @@ that the producer of the search log stream is in Go package
     type SearchImpression struct {
         Session string
         Query   string
-	    Results []string // List of search results.
+        Results []string // List of search results.
     }
 
 
@@ -136,7 +136,7 @@ naming streams given a Go type, like `SearchImpression`:
 
 1. Given an instance of the Go struct type, say
    `msg:=SearchImpression{}`, we can get the type
-   
+
    ```
    t:=reflect.TypeOf(msg)
    ```
@@ -159,7 +159,7 @@ naming streams given a Go type, like `SearchImpression`:
    and bucket names.
 
 1. The prefix (`dev`) and suffix (`123456`) are added with delimitor
-   `--` to form the Kinesis/Firehose steram name: 
+   `--` to form the Kinesis/Firehose steram name:
 
    ```
    sname := strings.Join([]string{prefix, full, suffix}, "--")
@@ -168,8 +168,8 @@ naming streams given a Go type, like `SearchImpression`:
 1. The Firehose bucket name must be all lower-cased:
 
     ```
-	bname := strings.ToLower()
-	```
+    bname := strings.ToLower()
+    ```
 
 
 Then, given a bucket name `bname`, we can extract the Go type name by:
@@ -229,22 +229,21 @@ Given `nameToType` and `dlog.RegisterType`, once we have bucket name
 full := strings.Split(bname, "--")[1]
 if t, ok := nameToType[full]; ok {
     v := reflect.New(t)
-	gob.NewDecoder(s3BucketFile).DecodeValue(v)
+    gob.NewDecoder(s3BucketFile).DecodeValue(v)
 } else {
-	return fmt.Errorf("Unknow type name %s", full)
+    return fmt.Errorf("Unknow type name %s", full)
 }
 ```
 
 For a more complete example, please refer to http://play.golang.org/p/V4NYaFSSY-
 
 
-
 ### Buffered Write to Kinesis
 
 We can use either Kinesis API `PutRecord` to send a single log message
 to Kinesis server, or use `PutRecords` to put a slice of messages as a
-batch.  Usually, we should use the latter, because each log message is
-much smaller than the 1MB limit of batch size.  Do we this batching,
+batch. Usually, we should use the latter, because each log message is
+much smaller than the 5MB limit of batch size.  Do we this batching,
 we need a buffer.  And considering that multiple threads are likely
 write through the same buffer, we want a thread-safe implementation of
 buffer.  And Go happens have one -- the Go channel.
@@ -262,10 +261,10 @@ buffer -> "sync goroutine" -> kinesis -> "Firehose persistency" -> s3;
 }
 )
 
-Given that Kinesis prefers the maximam batch size to be 1MB, and
-`reflect.Type.Size()` returns the size of a Go variable in bytes, we
-can easily compute the batch size as 1MB/msgSize.
-
+Given that `PutRecords` API prefers the maximun batch size be 5MB, the maximum
+entry size in batch be 1MB, and entry data be the type of `[]byte`, we should
+encode each message to `[]byte`, check its size before send to buffered
+channel, and send batch to `PutRecords` API before its size exceeds 5MB.
 
 If the Kinesis/Firehose service runs slower than the sync goroutine,
 according to AWS document, we can increase the number of Kinesis
@@ -275,4 +274,3 @@ If sync goroutine runs slower than write goroutines, the Go channel
 might be full and writes are blocked.  Since clients might not want to
 be blocked for too long time, we should introduce a write timeout
 here using Go's `select` and `time.After()`.
-
