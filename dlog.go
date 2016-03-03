@@ -88,7 +88,6 @@ func (l *Logger) Log(msg interface{}) error {
 		select {
 		case l.buffer <- en:
 		case <-timeout:
-			// TODO(y): Add unit test for write timeout logic.
 			return fmt.Errorf("dlog writes %+v timeout after %v", msg, l.WriteTimeout)
 		}
 	}
