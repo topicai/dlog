@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AdRoll/goamz/kinesis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
@@ -183,4 +184,45 @@ func TestLogWriteTimeout(t *testing.T) {
 			break
 		}
 	}
+}
+
+func TestRetry(t *testing.T) {
+	assert := assert.New(t)
+
+	mockKinesis := newKinesisMock()
+	l, e := NewLogger(&impression{}, &Options{
+		WriteTimeout:     3 * time.Second,
+		SyncPeriod:       1 * time.Second,
+		MaxRetryTimes:    3,
+		StreamNamePrefix: "dev",
+		UseMockKinesis:   true,
+		MockKinesis:      mockKinesis,
+	})
+	assert.Nil(e)
+	assert.NotNil(l)
+
+	entries := []kinesis.PutRecordsRequestEntry{}
+
+	for i := 0; i < 10; i++ {
+		search := &impression{
+			Session: "Jack",
+			Query:   "food",
+			Results: []string{strings.Repeat("1234567890", 1024*10)},
+		}
+
+		data := encode(search)
+		entry := kinesis.PutRecordsRequestEntry{
+			Data:         data,
+			PartitionKey: partitionKey(data),
+		}
+
+		entries = append(entries, entry)
+	}
+
+	l.retry(1, &entries)
+
+	time.Sleep(7 * time.Second) // waiting to sync
+
+	actual := mockKinesis.storage[l.streamName][0]
+	assert.Equal(entries, actual)
 }

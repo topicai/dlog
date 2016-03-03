@@ -31,6 +31,9 @@ type Options struct {
 	// packed messages to Kinesis periodically. 0 means 1 second.
 	SyncPeriod time.Duration
 
+	// Retry if failed to sync to Kinesis. 0 means not retry.
+	MaxRetryTimes uint
+
 	UseMockKinesis bool // By default this is false, which means using AWS Kinesis.
 	MockKinesis    KinesisInterface
 }

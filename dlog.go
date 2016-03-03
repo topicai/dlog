@@ -24,6 +24,9 @@ const (
 
 	// We use MD5 to compute the partitionKey.
 	partitionKeySize = 128
+
+	// retry after delay since failed to sync last time
+	retryDelay = 5 * time.Second
 )
 
 var (
@@ -138,17 +141,21 @@ func (l *Logger) flush(buf *[][]byte, bufSize *int) {
 
 	resp, e := l.kinesis.PutRecords(l.streamName, entries)
 	if e != nil {
-		failedRecords.Add(int64(len(entries)))
-
-		// TODO(y): Retry sending the whole batch for up to n times.
 		log.Printf("PutRecords error %v", e)
+
+		if l.Options.MaxRetryTimes <= 0 {
+			failedRecords.Add(int64(len(entries)))
+		} else {
+			l.retry(1, &entries)
+		}
 	} else if resp.FailedRecordCount > 0 {
+		log.Printf("PutRecords response error: %+v", resp)
+
 		writtenBatches.Add(1)
 		writtenRecords.Add(int64(len(entries) - resp.FailedRecordCount))
 		failedRecords.Add(int64(resp.FailedRecordCount))
 
 		// TODO(y): Resend the failed records.
-		log.Printf("PutRecords response error: %+v", resp)
 	} else {
 		writtenBatches.Add(1)
 		writtenRecords.Add(int64(len(entries)))
@@ -163,6 +170,41 @@ func (l *Logger) flush(buf *[][]byte, bufSize *int) {
 
 	*buf = (*buf)[0:0]
 	*bufSize = 0
+}
+
+func (l *Logger) retry(times uint, entries *[]kinesis.PutRecordsRequestEntry) {
+	go func() {
+		time.Sleep(retryDelay)
+
+		resp, e := l.kinesis.PutRecords(l.streamName, *entries)
+		if e != nil {
+			log.Printf("PutRecords error %v", e)
+
+			if times >= l.Options.MaxRetryTimes { //last time
+				failedRecords.Add(int64(len(*entries)))
+			} else {
+				l.retry(times + 1, entries)
+			}
+		} else if resp.FailedRecordCount > 0 {
+			log.Printf("PutRecords response error: %+v", resp)
+
+			writtenBatches.Add(1)
+			writtenRecords.Add(int64(len(*entries) - resp.FailedRecordCount))
+			failedRecords.Add(int64(resp.FailedRecordCount))
+
+			// TODO(y): Resend the failed records.
+		} else {
+			writtenBatches.Add(1)
+			writtenRecords.Add(int64(len(*entries)))
+		}
+
+		log.Printf(
+			"after retry PutRecords, writtenBatches = %v, writtenRecords = %v, failedRecords = %v",
+			writtenBatches,
+			writtenRecords,
+			failedRecords,
+		)
+	}()
 }
 
 func partitionKey(data []byte) string {
