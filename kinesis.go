@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/AdRoll/goamz/kinesis"
+	"time"
 )
 
 type KinesisInterface interface {
@@ -52,4 +53,36 @@ func (mock *kinesisMock) DescribeStream(name string) (resp *kinesis.StreamDescri
 func (mock *kinesisMock) DeleteStream(name string) error {
 	log.Panic("kinesisMock.DeleteStream is not implemented")
 	return nil
+}
+
+// slowKinesisMock is used to test if WriteTimeout works in Logger.log()
+type slowKinesisMock struct {
+	*kinesisMock
+
+	// simulate lantency that sync to Kinesis
+	latency time.Duration
+}
+
+func newSlowKinesisMock(latency time.Duration) *slowKinesisMock {
+	return &slowKinesisMock{
+		kinesisMock: newKinesisMock(),
+		latency:     latency,
+	}
+}
+
+func (mock *slowKinesisMock) PutRecords(streamName string, records []kinesis.PutRecordsRequestEntry) (resp *kinesis.PutRecordsResponse, err error) {
+	if !streamNameRegexp.MatchString(streamName) {
+		log.Panicf("Invalid stream name %s", streamName)
+	}
+
+	if len(records) == 0 {
+		log.Panicf("records length == 0")
+	}
+
+	time.Sleep(mock.latency)
+
+	mock.storage[streamName] = append(mock.storage[streamName], records)
+	return &kinesis.PutRecordsResponse{
+		FailedRecordCount: 0, // Always success.
+		Records:           nil}, nil
 }

@@ -5,9 +5,10 @@ import (
 
 	"github.com/AdRoll/goamz/kinesis"
 	"github.com/stretchr/testify/assert"
+	"time"
 )
 
-func TestKinesisPutRecords(t *testing.T) {
+func TestKinesisMockPutRecords(t *testing.T) {
 	assert := assert.New(t)
 
 	m := newKinesisMock()
@@ -32,4 +33,14 @@ func TestKinesisPutRecords(t *testing.T) {
 		m.PutRecords("dev--github.com-topicai-dlog.Log--0123", make([]kinesis.PutRecordsRequestEntry, 1))
 	})
 
+}
+
+func TestSlowKinesisMockPutRecords(t *testing.T) {
+	assert := assert.New(t)
+
+	m := newSlowKinesisMock(3 * time.Second)
+
+	assert.NotPanics(func() {
+		m.PutRecords("dev--github.com-topicai-dlog.Log--0123", make([]kinesis.PutRecordsRequestEntry, 1))
+	})
 }
