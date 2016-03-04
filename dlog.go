@@ -126,6 +126,7 @@ func (l *Logger) sync() {
 			if bufSize+len(msg)+partitionKeySize >= maxBatchSize {
 				l.flush(&buf, &bufSize)
 			}
+
 			buf = append(buf, encode(msg))
 			bufSize += len(msg) + partitionKeySize
 
@@ -138,55 +139,54 @@ func (l *Logger) sync() {
 }
 
 func (l *Logger) flush(buf *[][]byte, bufSize *int) {
-	entries := make([]kinesis.PutRecordsRequestEntry, 0, len(*buf))
 
-	for _, msg := range *buf {
-		entries = append(entries, kinesis.PutRecordsRequestEntry{
-			Data:         msg,
-			PartitionKey: partitionKey(msg),
-		})
-	}
+	c := make(chan [][]byte)
 
-	resp, e := l.kinesis.PutRecords(l.streamName, entries)
-	if e == nil {
-		if resp.FailedRecordCount > 0 {
-			log.Printf("PutRecords some records failed: %+v", resp)
+	go func() {
+		bf := <- c // waiting for data
+
+		entries := make([]kinesis.PutRecordsRequestEntry, 0, len(bf))
+		for _, msg := range bf {
+			entries = append(entries, kinesis.PutRecordsRequestEntry{
+				Data:         msg,
+				PartitionKey: partitionKey(msg),
+			})
 		}
 
-		l.writtenBatches.Add(1)
-		l.writtenRecords.Add(int64(len(entries) - resp.FailedRecordCount))
-		l.failedRecords.Add(int64(resp.FailedRecordCount))
-	} else {
-		log.Printf("PutRecords error %v", e)
-
-		if l.Options.MaxRetryTimes <= 0 {
-			l.failedRecords.Add(int64(len(entries)))
-		} else {
-			go l.retry(&entries)
+		if l.MaxRetryTimes <= 0 {
+			l.MaxRetryTimes = 1
 		}
-	}
 
+		Retry:
+		for retryTimes := 0; retryTimes < l.MaxRetryTimes; retryTimes++ {
+			resp, e := l.kinesis.PutRecords(l.streamName, entries)
+			if e == nil {
+				if resp.FailedRecordCount > 0 {
+					log.Printf("PutRecords some records failed: %+v", resp)
+				}
+
+				l.writtenBatches.Add(1)
+				l.writtenRecords.Add(int64(len(entries) - resp.FailedRecordCount))
+				l.failedRecords.Add(int64(resp.FailedRecordCount))
+
+				break Retry
+			} else if retryTimes == l.MaxRetryTimes - 1 { // the last trial failed.
+				log.Printf("PutRecords the last trial failed: %v", e)
+
+				l.failedRecords.Add(int64(len(entries)))
+				break Retry
+			}
+
+			time.Sleep(putRecordsRetryDelay)
+		}
+	}()
+
+	c <- *buf
+	close(c)
+
+	// reset buf and bufSize
 	*buf = (*buf)[0:0]
 	*bufSize = 0
-}
-
-func (l *Logger) retry(entries *[]kinesis.PutRecordsRequestEntry) {
-
-	Retry:
-	for retryTimes := uint(0); retryTimes < l.MaxRetryTimes; retryTimes++ {
-		resp, e := l.kinesis.PutRecords(l.streamName, *entries)
-		if e == nil {
-			l.writtenBatches.Add(1)
-			l.writtenRecords.Add(int64(len(*entries) - resp.FailedRecordCount))
-			l.failedRecords.Add(int64(resp.FailedRecordCount))
-			break Retry
-		} else if retryTimes >= l.Options.MaxRetryTimes - 1 {
-			l.failedRecords.Add(int64(len(*entries)))
-			break Retry
-		}
-
-		time.Sleep(putRecordsRetryDelay)
-	}
 }
 
 func partitionKey(data []byte) string {

@@ -32,7 +32,7 @@ type Options struct {
 	SyncPeriod time.Duration
 
 	// Retry if failed to sync to Kinesis. 0 means not retry.
-	MaxRetryTimes uint
+	MaxRetryTimes int
 
 	UseMockKinesis bool // By default this is false, which means using AWS Kinesis.
 	MockKinesis    KinesisInterface

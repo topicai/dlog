@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/AdRoll/goamz/kinesis"
+	"fmt"
 )
 
 type KinesisInterface interface {
@@ -30,6 +31,7 @@ func newKinesisMock(putRecordsLatency time.Duration) *kinesisMock {
 }
 
 func (mock *kinesisMock) PutRecords(streamName string, records []kinesis.PutRecordsRequestEntry) (resp *kinesis.PutRecordsResponse, err error) {
+
 	if !streamNameRegexp.MatchString(streamName) {
 		log.Panicf("Invalid stream name %s", streamName)
 	}
@@ -59,4 +61,19 @@ func (mock *kinesisMock) DescribeStream(name string) (resp *kinesis.StreamDescri
 func (mock *kinesisMock) DeleteStream(name string) error {
 	log.Panic("kinesisMock.DeleteStream is not implemented")
 	return nil
+}
+
+
+type brokenKinesisMock struct {
+	*kinesisMock
+}
+
+func newBrokenKinesisMock() *brokenKinesisMock {
+	return &brokenKinesisMock{
+		kinesisMock: newKinesisMock(0),
+	}
+}
+
+func (mock *brokenKinesisMock) PutRecords(streamName string, records []kinesis.PutRecordsRequestEntry) (resp *kinesis.PutRecordsResponse, err error) {
+	return nil, fmt.Errorf("Kinesis is broken")
 }

@@ -2,13 +2,11 @@ package dlog
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/AdRoll/goamz/kinesis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
@@ -154,28 +152,9 @@ func (s *WriteLogSuiteTester) TestWriteLog() {
 
 	time.Sleep(3 * time.Second) // make sure records in buf will be sent to Kinesis
 
-	log.Printf(
-		"Messages to %v, writtenBatches = %v, writtenRecords = %v, failedRecords = %v, tooBigMesssages = %v",
-		s.clickLogger.streamName,
-		s.clickLogger.writtenBatches,
-		s.clickLogger.writtenRecords,
-		s.clickLogger.failedRecords,
-		s.clickLogger.tooBigMesssages,
-	)
-
 	writtenClickRecords, _ := strconv.Atoi(s.clickLogger.writtenRecords.String())
 	failedClickRecords, _ := strconv.Atoi(s.clickLogger.failedRecords.String())
 	s.Equal(count, writtenClickRecords + failedClickRecords)
-
-
-	log.Printf(
-		"Messages to %v, writtenBatches = %v, writtenRecords = %v, failedRecords = %v, tooBigMesssages = %v",
-		s.seachLogger.streamName,
-		s.seachLogger.writtenBatches,
-		s.seachLogger.writtenRecords,
-		s.seachLogger.failedRecords,
-		s.seachLogger.tooBigMesssages,
-	)
 
 	writtenSearchRecords, _ := strconv.Atoi(s.seachLogger.writtenRecords.String())
 	failedSearchRecords, _ := strconv.Atoi(s.seachLogger.failedRecords.String())
@@ -218,19 +197,17 @@ func TestLogWriteTimeout(t *testing.T) {
 func TestRetry(t *testing.T) {
 	assert := assert.New(t)
 
-	mockKinesis := newKinesisMock(0)
+	mockKinesis := newBrokenKinesisMock()
 	l, e := NewLogger(&impression{}, &Options{
 		WriteTimeout:     3 * time.Second,
 		SyncPeriod:       1 * time.Second,
-		MaxRetryTimes:    3,
+		MaxRetryTimes:    2,
 		StreamNamePrefix: "dev",
 		UseMockKinesis:   true,
 		MockKinesis:      mockKinesis,
 	})
 	assert.Nil(e)
 	assert.NotNil(l)
-
-	entries := []kinesis.PutRecordsRequestEntry{}
 
 	for i := 0; i < 10; i++ {
 		search := &impression{
@@ -239,17 +216,10 @@ func TestRetry(t *testing.T) {
 			Results: []string{ "1234567890" },
 		}
 
-		data := encode(search)
-		entry := kinesis.PutRecordsRequestEntry{
-			Data:         data,
-			PartitionKey: partitionKey(data),
-		}
-
-		entries = append(entries, entry)
+		l.Log(search)
 	}
 
-	l.retry(&entries)
+	time.Sleep(11 * time.Second) // wait for retry is completed
 
-	actual := mockKinesis.storage[l.streamName][0]
-	assert.Equal(entries, actual)
+	assert.Equal("10", l.failedRecords.String())
 }
