@@ -2,6 +2,7 @@ package dlog
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"testing"
@@ -130,7 +131,8 @@ func (s *WriteLogSuiteTester) TestWriteLog() {
 		}
 	}()
 
-	for i := 0; i < 20; i++ {
+	count := 20
+	for i := 0; i < count; i++ {
 		click := &click{
 			Session: "Ethan",
 			Element: "btnAddVenue" + strconv.Itoa(i),
@@ -150,7 +152,34 @@ func (s *WriteLogSuiteTester) TestWriteLog() {
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	time.Sleep(3 * time.Second) // make sure records in buffer channel will be sent to Kinesis
+	time.Sleep(3 * time.Second) // make sure records in buf will be sent to Kinesis
+
+	log.Printf(
+		"Messages to %v, writtenBatches = %v, writtenRecords = %v, failedRecords = %v, tooBigMesssages = %v",
+		s.clickLogger.streamName,
+		s.clickLogger.writtenBatches,
+		s.clickLogger.writtenRecords,
+		s.clickLogger.failedRecords,
+		s.clickLogger.tooBigMesssages,
+	)
+
+	writtenClickRecords, _ := strconv.Atoi(s.clickLogger.writtenRecords.String())
+	failedClickRecords, _ := strconv.Atoi(s.clickLogger.failedRecords.String())
+	s.Equal(count, writtenClickRecords + failedClickRecords)
+
+
+	log.Printf(
+		"Messages to %v, writtenBatches = %v, writtenRecords = %v, failedRecords = %v, tooBigMesssages = %v",
+		s.seachLogger.streamName,
+		s.seachLogger.writtenBatches,
+		s.seachLogger.writtenRecords,
+		s.seachLogger.failedRecords,
+		s.seachLogger.tooBigMesssages,
+	)
+
+	writtenSearchRecords, _ := strconv.Atoi(s.seachLogger.writtenRecords.String())
+	failedSearchRecords, _ := strconv.Atoi(s.seachLogger.failedRecords.String())
+	s.Equal(count, writtenSearchRecords + failedSearchRecords)
 }
 
 func TestRunWriteLogSuite(t *testing.T) {
@@ -219,9 +248,7 @@ func TestRetry(t *testing.T) {
 		entries = append(entries, entry)
 	}
 
-	l.retry(1, &entries)
-
-	time.Sleep(7 * time.Second) // waiting to sync
+	l.retry(&entries)
 
 	actual := mockKinesis.storage[l.streamName][0]
 	assert.Equal(entries, actual)
