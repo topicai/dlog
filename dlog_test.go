@@ -37,7 +37,7 @@ func TestLoggingToMockKinesis(t *testing.T) {
 		WriteTimeout:   0, // Wait forever.
 		SyncPeriod:     time.Second,
 		UseMockKinesis: true,
-		MockKinesis:    newKinesisMock(),
+		MockKinesis:    newKinesisMock(0),
 	})
 	assert.Nil(e)
 	assert.NotNil(l)
@@ -165,7 +165,7 @@ func TestLogWriteTimeout(t *testing.T) {
 		WriteTimeout:   3 * time.Second,
 		SyncPeriod:     10000 * time.Second, // set a long time to make time ticker will not trigger sync
 		UseMockKinesis: true,
-		MockKinesis:    newSlowKinesisMock(600 * time.Second), // make latency big enough
+		MockKinesis:    newKinesisMock(600 * time.Second), // make latency big enough
 	})
 	assert.Nil(e)
 	assert.NotNil(l)
@@ -189,7 +189,7 @@ func TestLogWriteTimeout(t *testing.T) {
 func TestRetry(t *testing.T) {
 	assert := assert.New(t)
 
-	mockKinesis := newKinesisMock()
+	mockKinesis := newKinesisMock(0)
 	l, e := NewLogger(&impression{}, &Options{
 		WriteTimeout:     3 * time.Second,
 		SyncPeriod:       1 * time.Second,
@@ -207,7 +207,7 @@ func TestRetry(t *testing.T) {
 		search := &impression{
 			Session: "Jack",
 			Query:   "food",
-			Results: []string{strings.Repeat("1234567890", 1024*10)},
+			Results: []string{ "1234567890" },
 		}
 
 		data := encode(search)
