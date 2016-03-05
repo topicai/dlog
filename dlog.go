@@ -24,9 +24,6 @@ const (
 
 	// We use MD5 to compute the partitionKey.
 	partitionKeySize = 128
-
-	// retry after delay since failed to sync last time
-	putRecordsRetryDelay = 5 * time.Second
 )
 
 type Logger struct {
@@ -148,35 +145,21 @@ func (l *Logger) flush(buf *[][]byte, bufSize *int) {
 		})
 	}
 
-	go func() {
-
-		if l.MaxRetryTimes <= 0 {
-			l.MaxRetryTimes = 1
+	resp, e := l.kinesis.PutRecords(l.streamName, entries)
+	if e == nil {
+		if resp.FailedRecordCount > 0 {
+			log.Printf("PutRecords some records failed: %+v", resp)
 		}
 
-		Retry:
-		for retryTimes := 0; retryTimes < l.MaxRetryTimes; retryTimes++ {
-			resp, e := l.kinesis.PutRecords(l.streamName, entries)
-			if e == nil {
-				if resp.FailedRecordCount > 0 {
-					log.Printf("PutRecords some records failed: %+v", resp)
-				}
+		l.writtenBatches.Add(1)
+		l.writtenRecords.Add(int64(len(entries) - resp.FailedRecordCount))
+		l.failedRecords.Add(int64(resp.FailedRecordCount))
 
-				l.writtenBatches.Add(1)
-				l.writtenRecords.Add(int64(len(entries) - resp.FailedRecordCount))
-				l.failedRecords.Add(int64(resp.FailedRecordCount))
+	} else {
+		log.Printf("PutRecords failed: %v", e)
 
-				break Retry
-			} else if retryTimes == l.MaxRetryTimes - 1 { // the last trial failed.
-				log.Printf("PutRecords the last trial failed: %v", e)
-
-				l.failedRecords.Add(int64(len(entries)))
-				break Retry
-			}
-
-			time.Sleep(putRecordsRetryDelay)
-		}
-	}()
+		l.failedRecords.Add(int64(len(entries)))
+	}
 
 	// reset buf and bufSize
 	*buf = (*buf)[0:0]

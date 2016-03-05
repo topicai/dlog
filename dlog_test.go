@@ -172,8 +172,7 @@ func TestRunWriteLogSuite(t *testing.T) {
 	suite.Run(t, suiteTester)
 }
 
-// because use goroutine in Logger.flush(), it's impossible to
-// set a timeout senario, so this unit test will always be right
+
 func TestLogWriteTimeout(t *testing.T) {
 	assert := assert.New(t)
 
@@ -198,41 +197,10 @@ func TestLogWriteTimeout(t *testing.T) {
 
 		e = l.Log(search)
 		if e != nil {
-			assert.NotNil(e)
-			assert.True(strings.Contains(fmt.Sprint(e), "timeout after"))
 			break
 		}
 	}
-}
 
-func TestRetry(t *testing.T) {
-	assert := assert.New(t)
-
-	l, e := NewLogger(&impression{}, &Options{
-		WriteTimeout:     3 * time.Second,
-		SyncPeriod:       1 * time.Second,
-		MaxRetryTimes:    2,
-		StreamNamePrefix: "dev",
-		UseMockKinesis:   true,
-		MockKinesis:      newBrokenKinesisMock(),
-	})
-	assert.Nil(e)
-	assert.NotNil(l)
-
-	e = l.MockKinesis.CreateStream(l.streamName, 2)
-	assert.Nil(e)
-
-	for i := 0; i < 10; i++ {
-		search := &impression{
-			Session: "Jack",
-			Query:   "food",
-			Results: []string{"1234567890"},
-		}
-
-		l.Log(search)
-	}
-
-	time.Sleep(11 * time.Second) // wait for retry is completed
-
-	assert.Equal("10", l.failedRecords.String())
+	assert.NotNil(e)
+	assert.True(strings.Contains(fmt.Sprint(e), "timeout after"))
 }
