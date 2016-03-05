@@ -140,18 +140,15 @@ func (l *Logger) sync() {
 
 func (l *Logger) flush(buf *[][]byte, bufSize *int) {
 
-	c := make(chan [][]byte)
+	entries := make([]kinesis.PutRecordsRequestEntry, 0, len(*buf))
+	for _, msg := range *buf {
+		entries = append(entries, kinesis.PutRecordsRequestEntry{
+			Data:         msg,
+			PartitionKey: partitionKey(msg),
+		})
+	}
 
 	go func() {
-		bf := <- c // waiting for data
-
-		entries := make([]kinesis.PutRecordsRequestEntry, 0, len(bf))
-		for _, msg := range bf {
-			entries = append(entries, kinesis.PutRecordsRequestEntry{
-				Data:         msg,
-				PartitionKey: partitionKey(msg),
-			})
-		}
 
 		if l.MaxRetryTimes <= 0 {
 			l.MaxRetryTimes = 1
@@ -180,9 +177,6 @@ func (l *Logger) flush(buf *[][]byte, bufSize *int) {
 			time.Sleep(putRecordsRetryDelay)
 		}
 	}()
-
-	c <- *buf
-	close(c)
 
 	// reset buf and bufSize
 	*buf = (*buf)[0:0]
