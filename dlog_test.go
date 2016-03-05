@@ -41,6 +41,9 @@ func TestLoggingToMockKinesis(t *testing.T) {
 	assert.Nil(e)
 	assert.NotNil(l)
 
+	e = l.MockKinesis.CreateStream(l.streamName, 2)
+	assert.Nil(e)
+
 	storage := l.kinesis.(*kinesisMock).storage
 	assert.NotNil(storage)
 
@@ -74,6 +77,9 @@ func (s *WriteLogSuiteTester) SetupSuite() {
 		Region:           testingRegion,
 		StreamNamePrefix: "testing",
 		StreamNameSuffix: fmt.Sprint(time.Now().UnixNano()),
+
+		UseMockKinesis: true,
+		MockKinesis:    newKinesisMock(0 * time.Second),
 	}
 
 	var err error
@@ -154,11 +160,11 @@ func (s *WriteLogSuiteTester) TestWriteLog() {
 
 	writtenClickRecords, _ := strconv.Atoi(s.clickLogger.writtenRecords.String())
 	failedClickRecords, _ := strconv.Atoi(s.clickLogger.failedRecords.String())
-	s.Equal(count, writtenClickRecords + failedClickRecords)
+	s.Equal(count, writtenClickRecords+failedClickRecords)
 
 	writtenSearchRecords, _ := strconv.Atoi(s.seachLogger.writtenRecords.String())
 	failedSearchRecords, _ := strconv.Atoi(s.seachLogger.failedRecords.String())
-	s.Equal(count, writtenSearchRecords + failedSearchRecords)
+	s.Equal(count, writtenSearchRecords+failedSearchRecords)
 }
 
 func TestRunWriteLogSuite(t *testing.T) {
@@ -166,11 +172,13 @@ func TestRunWriteLogSuite(t *testing.T) {
 	suite.Run(t, suiteTester)
 }
 
+// because use goroutine in Logger.flush(), it's impossible to
+// set a timeout senario, so this unit test will always be right
 func TestLogWriteTimeout(t *testing.T) {
 	assert := assert.New(t)
 
 	l, e := NewLogger(&impression{}, &Options{
-		WriteTimeout:   3 * time.Second,
+		WriteTimeout:   2 * time.Second,
 		SyncPeriod:     10000 * time.Second, // set a long time to make time ticker will not trigger sync
 		UseMockKinesis: true,
 		MockKinesis:    newKinesisMock(600 * time.Second), // make latency big enough
@@ -178,11 +186,14 @@ func TestLogWriteTimeout(t *testing.T) {
 	assert.Nil(e)
 	assert.NotNil(l)
 
-	for i := 0; i < 100000; i++ { // write enough messages to make sure buf is full and trigger sync
+	e = l.MockKinesis.CreateStream(l.streamName, 2)
+	assert.Nil(e)
+
+	for i := 0; i < 100; i++ { // write enough messages to make sure buf is full and trigger sync
 		search := &impression{
 			Session: "Jack",
 			Query:   "food",
-			Results: []string{strings.Repeat("1234567890", 1024*10)},
+			Results: []string{strings.Repeat("1234567890", 1024*100)},
 		}
 
 		e = l.Log(search)
@@ -197,23 +208,25 @@ func TestLogWriteTimeout(t *testing.T) {
 func TestRetry(t *testing.T) {
 	assert := assert.New(t)
 
-	mockKinesis := newBrokenKinesisMock()
 	l, e := NewLogger(&impression{}, &Options{
 		WriteTimeout:     3 * time.Second,
 		SyncPeriod:       1 * time.Second,
 		MaxRetryTimes:    2,
 		StreamNamePrefix: "dev",
 		UseMockKinesis:   true,
-		MockKinesis:      mockKinesis,
+		MockKinesis:      newBrokenKinesisMock(),
 	})
 	assert.Nil(e)
 	assert.NotNil(l)
+
+	e = l.MockKinesis.CreateStream(l.streamName, 2)
+	assert.Nil(e)
 
 	for i := 0; i < 10; i++ {
 		search := &impression{
 			Session: "Jack",
 			Query:   "food",
-			Results: []string{ "1234567890" },
+			Results: []string{"1234567890"},
 		}
 
 		l.Log(search)

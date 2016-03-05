@@ -1,11 +1,11 @@
 package dlog
 
 import (
-	"log"
 	"time"
 
-	"github.com/AdRoll/goamz/kinesis"
 	"fmt"
+	"github.com/AdRoll/goamz/kinesis"
+	"errors"
 )
 
 type KinesisInterface interface {
@@ -21,23 +21,31 @@ type kinesisMock struct {
 
 	// simulate lantency that sync to Kinesis
 	putRecordLatency time.Duration
+
+	// created streams' names
+	streamNames []string
 }
 
 func newKinesisMock(putRecordsLatency time.Duration) *kinesisMock {
 	return &kinesisMock{
 		storage:          make(map[string][][]kinesis.PutRecordsRequestEntry),
 		putRecordLatency: putRecordsLatency,
+		streamNames:      make([]string, 0),
 	}
 }
 
 func (mock *kinesisMock) PutRecords(streamName string, records []kinesis.PutRecordsRequestEntry) (resp *kinesis.PutRecordsResponse, err error) {
 
 	if !streamNameRegexp.MatchString(streamName) {
-		log.Panicf("Invalid stream name %s", streamName)
+		return nil, fmt.Errorf("Invalid stream name %s", streamName)
+	}
+
+	if !mock.find(streamName) {
+		return nil, fmt.Errorf("Not found stream %s", streamName)
 	}
 
 	if len(records) == 0 {
-		log.Panicf("records length == 0")
+		return nil, errors.New("records length == 0")
 	}
 
 	time.Sleep(mock.putRecordLatency)
@@ -49,20 +57,71 @@ func (mock *kinesisMock) PutRecords(streamName string, records []kinesis.PutReco
 }
 
 func (mock *kinesisMock) CreateStream(name string, shardCount int) error {
-	log.Panic("kinesisMock.CreateStream is not implemented")
+
+	if !streamNameRegexp.MatchString(name) {
+		return fmt.Errorf("Invalid stream name %s", name)
+	}
+
+	if mock.find(name) {
+		return fmt.Errorf("Stream already exists %s", name)
+	}
+
+	mock.streamNames = append(mock.streamNames, name)
 	return nil
 }
 
 func (mock *kinesisMock) DescribeStream(name string) (resp *kinesis.StreamDescription, err error) {
-	log.Panic("kinesisMock.DescribeStream is not implemented")
-	return nil, nil
+
+	if !streamNameRegexp.MatchString(name) {
+		return nil, fmt.Errorf("Invalid stream name %s", name)
+	}
+
+	if !mock.find(name) {
+		return nil, fmt.Errorf("Not found stream %s", name)
+	}
+
+	resp = &kinesis.StreamDescription{
+		StreamName:   name,
+		StreamStatus: "Active",
+	}
+	return resp, nil
 }
 
 func (mock *kinesisMock) DeleteStream(name string) error {
-	log.Panic("kinesisMock.DeleteStream is not implemented")
+
+	if !streamNameRegexp.MatchString(name) {
+		return fmt.Errorf("Invalid stream name %s", name)
+	}
+
+	if !mock.find(name) {
+		return fmt.Errorf("Not found stream %s", name)
+	}
+
+	newStreamNames := make([]string, 0, len(mock.streamNames) - 1)
+
+	for _, v := range mock.streamNames {
+		if v != name {
+			newStreamNames = append(newStreamNames, v)
+		}
+	}
+
+	mock.streamNames = newStreamNames
 	return nil
 }
 
+func (mock *kinesisMock) find(streamName string) bool {
+	if len(mock.streamNames) <= 0 {
+		return false
+	}
+
+	for _, v := range mock.streamNames {
+		if v == streamName {
+			return true
+		}
+	}
+
+	return false
+}
 
 type brokenKinesisMock struct {
 	*kinesisMock
