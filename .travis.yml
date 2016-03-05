@@ -1,0 +1,8 @@
+language: go
+
+go:
+  - 1.6
+
+script:
+  # Set "-p 1" to avoid call kinesisMock.CreateStream() in parallel
+  - go test -v -p 1 ./...
