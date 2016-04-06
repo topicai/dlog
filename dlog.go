@@ -124,7 +124,7 @@ func (l *Logger) sync() {
 				l.flush(&buf, &bufSize)
 			}
 
-			buf = append(buf, encode(msg))
+			buf = append(buf, msg)
 			bufSize += len(msg) + partitionKeySize
 
 		case <-ticker.C:
