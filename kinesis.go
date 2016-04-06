@@ -1,11 +1,12 @@
 package dlog
 
 import (
+	"errors"
+	"fmt"
+	"sync"
 	"time"
 
-	"fmt"
 	"github.com/AdRoll/goamz/kinesis"
-	"errors"
 )
 
 type KinesisInterface interface {
@@ -24,6 +25,9 @@ type kinesisMock struct {
 
 	// created streams' names
 	streamNames []string
+
+	// lock to solve concurrent call
+	lock sync.RWMutex
 }
 
 func newKinesisMock(putRecordsLatency time.Duration) *kinesisMock {
@@ -35,6 +39,8 @@ func newKinesisMock(putRecordsLatency time.Duration) *kinesisMock {
 }
 
 func (mock *kinesisMock) PutRecords(streamName string, records []kinesis.PutRecordsRequestEntry) (resp *kinesis.PutRecordsResponse, err error) {
+	mock.lock.Lock()
+	defer mock.lock.Unlock()
 
 	if !streamNameRegexp.MatchString(streamName) {
 		return nil, fmt.Errorf("Invalid stream name %s", streamName)
@@ -51,12 +57,15 @@ func (mock *kinesisMock) PutRecords(streamName string, records []kinesis.PutReco
 	time.Sleep(mock.putRecordLatency)
 
 	mock.storage[streamName] = append(mock.storage[streamName], records)
+
 	return &kinesis.PutRecordsResponse{
 		FailedRecordCount: 0, // Always success.
 		Records:           nil}, nil
 }
 
 func (mock *kinesisMock) CreateStream(name string, shardCount int) error {
+	mock.lock.Lock()
+	defer mock.lock.Unlock()
 
 	if !streamNameRegexp.MatchString(name) {
 		return fmt.Errorf("Invalid stream name %s", name)
@@ -71,6 +80,8 @@ func (mock *kinesisMock) CreateStream(name string, shardCount int) error {
 }
 
 func (mock *kinesisMock) DescribeStream(name string) (resp *kinesis.StreamDescription, err error) {
+	mock.lock.RLock()
+	defer mock.lock.RUnlock()
 
 	if !streamNameRegexp.MatchString(name) {
 		return nil, fmt.Errorf("Invalid stream name %s", name)
@@ -88,6 +99,8 @@ func (mock *kinesisMock) DescribeStream(name string) (resp *kinesis.StreamDescri
 }
 
 func (mock *kinesisMock) DeleteStream(name string) error {
+	mock.lock.Lock()
+	defer mock.lock.Unlock()
 
 	if !streamNameRegexp.MatchString(name) {
 		return fmt.Errorf("Invalid stream name %s", name)
@@ -97,7 +110,7 @@ func (mock *kinesisMock) DeleteStream(name string) error {
 		return fmt.Errorf("Not found stream %s", name)
 	}
 
-	newStreamNames := make([]string, 0, len(mock.streamNames) - 1)
+	newStreamNames := make([]string, 0, len(mock.streamNames)-1)
 
 	for _, v := range mock.streamNames {
 		if v != name {
